@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:game_app/models/tournament.dart';
-import 'package:game_app/screens/edit_tournament_page.dart';// Updated import
+import 'package:game_app/screens/edit_tournament_page.dart';
 import 'package:game_app/screens/tournament_overview_page.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -89,7 +89,7 @@ class HostedTournamentsPage extends StatelessWidget {
             itemCount: tournaments.length,
             itemBuilder: (context, index) {
               final tournament = tournaments[index];
-              final isPast = tournament.eventDate.isBefore(DateTime.now());
+              final isPast = tournament.endDate!.isBefore(DateTime.now());
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 16),
@@ -169,7 +169,7 @@ class HostedTournamentsPage extends StatelessWidget {
                                   style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
                                 ),
                                 Text(
-                                  'Date: ${DateFormat('MMM dd, yyyy').format(tournament.eventDate)}',
+                                  'Date: ${DateFormat('MMM dd, yyyy').format(tournament.startDate)}',
                                   style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
                                 ),
                                 Text(

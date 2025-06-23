@@ -38,8 +38,8 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
   late Animation<double> _fadeAnimation;
-  Timestamp? _eventDate;
-  String? _countdownText;
+  Timestamp? _matchStartTime;
+  String? _countdown;
   Timer? _countdownTimer;
   bool _canStartMatch = false;
 
@@ -47,21 +47,54 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
   void initState() {
     super.initState();
     _match = Map.from(widget.match);
-    _lastTeam1Score = _getCurrentScore(true);
-    _lastTeam2Score = _getCurrentScore(false);
-    _initializeServer();
-    _listenToMatchUpdates();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.2).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
-    );
-    _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
-    );
-    _startCountdown();
+    _initializeMatchStartTime().then((_) {
+      _lastTeam1Score = _getCurrentScore(true);
+      _lastTeam2Score = _getCurrentScore(false);
+      _initializeServer();
+      _listenToMatchUpdates();
+      _animationController = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 600),
+      );
+      _scaleAnimation = Tween<double>(begin: 0.8, end: 1.2).animate(
+        CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
+      );
+      _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+        CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
+      );
+      _startCountdown();
+    });
+  }
+
+  Future<void> _initializeMatchStartTime() async {
+    final tournamentDoc = await FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(widget.tournamentId)
+        .get();
+    final data = tournamentDoc.data();
+    final startDate = data?['startDate'] as Timestamp?;
+    final startTimeData = data?['startTime'] as Map<String, dynamic>?;
+    if (startDate != null && startTimeData != null) {
+      final hour = startTimeData['hour'] as int? ?? 0;
+      final minute = startTimeData['minute'] as int? ?? 0;
+      final startDateTime = DateTime(
+        startDate.toDate().year,
+        startDate.toDate().month,
+        startDate.toDate().day,
+        hour,
+        minute,
+      ).toUtc();
+      setState(() {
+        _matchStartTime = Timestamp.fromDate(startDateTime);
+        _match['startTime'] = _matchStartTime;
+      });
+    } else {
+      final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+      setState(() {
+        _matchStartTime = Timestamp.fromDate(now.add(const Duration(minutes: 5)));
+        _match['startTime'] = _matchStartTime;
+      });
+    }
   }
 
   @override
@@ -72,50 +105,64 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
   }
 
   void _startCountdown() {
-    _updateCountdown();
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        _updateCountdown();
-      } else {
-        timer.cancel();
-      }
-    });
-  }
-
-  void _updateCountdown() {
-    if (_eventDate == null) {
+    if (_match['liveScores']?['isLive'] == true || _match['completed'] == true) {
       setState(() {
-        _countdownText = 'Start time not scheduled';
-        _canStartMatch = true;
+        _countdown = null;
       });
+      _countdownTimer?.cancel();
       return;
     }
 
-    final now = DateTime.now();
-    final startTime = _eventDate!.toDate();
-    final difference = startTime.difference(now);
-
-    if (difference.isNegative) {
+    if (_matchStartTime == null) {
       setState(() {
-        _countdownText = 'Match can start';
-        _canStartMatch = true;
+        _countdown = 'Start time not scheduled';
       });
-    } else if (difference.inHours >= 24) {
-      final days = difference.inDays;
-      final hours = difference.inHours % 24;
-      setState(() {
-        _countdownText = '${days}d ${hours}h';
-        _canStartMatch = false;
-      });
-    } else {
-      final hours = difference.inHours;
-      final minutes = difference.inMinutes % 60;
-      final seconds = difference.inSeconds % 60;
-      setState(() {
-        _countdownText = '${hours}h ${minutes}m ${seconds}s';
-        _canStartMatch = false;
-      });
+      _countdownTimer?.cancel();
+      print('Countdown set to: $_countdown, _matchStartTime: $_matchStartTime');
+      return;
     }
+
+    setState(() {
+      _countdown = null; // Reset countdown before starting
+    });
+
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30)); // Convert to IST
+      print('Local Now (IST): $now'); // Debug the local time in IST
+      final startTime = _matchStartTime!.toDate().toUtc().add(const Duration(hours: 5, minutes: 30)); // Convert to IST
+      final difference = startTime.difference(now);
+
+      print('Now (IST): $now, StartTime (IST): $startTime, Difference: $difference');
+
+      if (difference.isNegative) {
+        setState(() {
+          _countdown = 'Match should have started';
+          _canStartMatch = true;
+        });
+        timer.cancel();
+      } else if (difference.inHours >= 24) {
+        final days = difference.inDays;
+        final hours = difference.inHours % 24;
+        setState(() {
+          _countdown = '${days}d ${hours}h';
+          _canStartMatch = false;
+        });
+      } else {
+        final hours = difference.inHours;
+        final minutes = difference.inMinutes % 60;
+        final seconds = difference.inSeconds % 60;
+        setState(() {
+          _countdown = '${hours}h ${minutes}m ${seconds}s';
+          _canStartMatch = false;
+        });
+      }
+    });
   }
 
   int _getCurrentScore(bool isTeam1) {
@@ -165,53 +212,51 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
         .doc(widget.tournamentId)
         .snapshots()
         .listen((snapshot) {
-      final data = snapshot.data();
-      if (data != null && mounted) {
-        setState(() {
-          _eventDate = data['eventDate'] as Timestamp?;
-        });
-        if (data['matches'] != null) {
-          final matches = List<Map<String, dynamic>>.from(data['matches']);
-          if (matches.length > widget.matchIndex) {
-            final newMatch = matches[widget.matchIndex];
-            final newTeam1Score = _getCurrentScoreFromMatch(newMatch, true);
-            final newTeam2Score = _getCurrentScoreFromMatch(newMatch, false);
-            if (newTeam1Score > (_lastTeam1Score ?? 0)) {
-              setState(() {
-                _showPlusOneTeam1 = true;
-                _animationController.forward().then((_) {
-                  _animationController.reverse();
-                  Future.delayed(const Duration(milliseconds: 100), () {
-                    if (mounted) {
-                      setState(() => _showPlusOneTeam1 = false);
-                    }
+          final data = snapshot.data();
+          if (data != null && mounted) {
+            if (data['matches'] != null) {
+              final matches = List<Map<String, dynamic>>.from(data['matches']);
+              if (matches.length > widget.matchIndex) {
+                final newMatch = matches[widget.matchIndex];
+                final newTeam1Score = _getCurrentScoreFromMatch(newMatch, true);
+                final newTeam2Score = _getCurrentScoreFromMatch(newMatch, false);
+                if (newTeam1Score > (_lastTeam1Score ?? 0)) {
+                  setState(() {
+                    _showPlusOneTeam1 = true;
+                    _animationController.forward().then((_) {
+                      _animationController.reverse();
+                      Future.delayed(const Duration(milliseconds: 100), () {
+                        if (mounted) {
+                          setState(() => _showPlusOneTeam1 = false);
+                        }
+                      });
+                    });
                   });
-                });
-              });
-            } else if (newTeam2Score > (_lastTeam2Score ?? 0)) {
-              setState(() {
-                _showPlusOneTeam2 = true;
-                _animationController.forward().then((_) {
-                  _animationController.reverse();
-                  Future.delayed(const Duration(milliseconds: 100), () {
-                    if (mounted) {
-                      setState(() => _showPlusOneTeam2 = false);
-                    }
+                } else if (newTeam2Score > (_lastTeam2Score ?? 0)) {
+                  setState(() {
+                    _showPlusOneTeam2 = true;
+                    _animationController.forward().then((_) {
+                      _animationController.reverse();
+                      Future.delayed(const Duration(milliseconds: 100), () {
+                        if (mounted) {
+                          setState(() => _showPlusOneTeam2 = false);
+                        }
+                      });
+                    });
                   });
+                }
+                setState(() {
+                  _match = newMatch;
+                  _initializeMatchStartTime().then((_) => _startCountdown());
+                  _lastTeam1Score = newTeam1Score;
+                  _lastTeam2Score = newTeam2Score;
+                  _checkSetCompletion();
+                  _initializeServer();
                 });
-              });
+              }
             }
-            setState(() {
-              _match = newMatch;
-              _lastTeam1Score = newTeam1Score;
-              _lastTeam2Score = newTeam2Score;
-              _checkSetCompletion();
-              _initializeServer();
-            });
           }
-        }
-      }
-    });
+        });
   }
 
   int _getCurrentScoreFromMatch(Map<String, dynamic> match, bool isTeam1) {
@@ -307,7 +352,7 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
   }
 
   Future<void> _updateLiveScore(bool isTeam1) async {
-    if (_isLoading || !mounted || _isSetComplete) return;
+    if (_isLoading || !mounted || _isSetComplete || _match['completed'] == true) return;
     setState(() {
       _isLoading = true;
     });
@@ -391,7 +436,7 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
   }
 
   Future<void> _decreaseScore(bool isTeam1) async {
-    if (_isLoading || !mounted || _isSetComplete) return;
+    if (_isLoading || !mounted || _isSetComplete || _match['completed'] == true) return;
     setState(() {
       _isLoading = true;
     });
@@ -502,7 +547,7 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
         }
       }
       if (team1Wins >= 2 || team2Wins >= 2) {
-        _endMatch();
+        _endMatch(); // Automatically end match if 2 sets are won
       }
     } else {
       setState(() {
@@ -512,7 +557,7 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
   }
 
   Future<void> _startNextSet() async {
-    if (_isLoading || !mounted || !_isSetComplete) return;
+    if (_isLoading || !mounted || !_isSetComplete || _match['completed'] == true) return;
     setState(() {
       _isLoading = true;
     });
@@ -543,8 +588,24 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
         }
       }
 
-      if (team1Wins >= 2 || team2Wins >= 2 || currentGame >= 3) {
+      if (team1Wins >= 2 || team2Wins >= 2) {
         await _endMatch();
+        return;
+      }
+
+      if (currentGame >= 3) {
+        if (mounted) {
+          toastification.show(
+            context: context,
+            type: ToastificationType.warning,
+            title: const Text('Match Limit Reached'),
+            description: const Text('Maximum sets (3) reached. Please end the match.'),
+            autoCloseDuration: const Duration(seconds: 2),
+            backgroundColor: Colors.orange,
+            foregroundColor: Colors.white,
+            alignment: Alignment.bottomCenter,
+          );
+        }
         return;
       }
 
@@ -609,7 +670,7 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
   }
 
   Future<void> _endMatch() async {
-    if (_isLoading || !mounted) return;
+    if (_isLoading || !mounted || _match['completed'] == true) return;
     setState(() {
       _isLoading = true;
     });
@@ -645,6 +706,10 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
       if (team1Wins >= 2) {
         winner = widget.isDoubles ? 'team1' : 'player1';
       } else if (team2Wins >= 2) {
+        winner = widget.isDoubles ? 'team2' : 'player2';
+      } else if (currentGame == 3 && team1Wins > team2Wins) {
+        winner = widget.isDoubles ? 'team1' : 'player1';
+      } else if (currentGame == 3 && team2Wins > team1Wins) {
         winner = widget.isDoubles ? 'team2' : 'player2';
       }
 
@@ -785,7 +850,7 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
         ],
       ),
       child: ElevatedButton(
-        onPressed: isLoading ? null : onPressed,
+        onPressed: isLoading || _match['completed'] == true ? null : onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
@@ -871,7 +936,6 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
         child: SafeArea(
           child: Column(
             children: [
-              // Header: Match Info
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
@@ -897,10 +961,9 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                             ),
                             textAlign: TextAlign.center,
                           ),
-                          if (_match['startTime'] != null)
+                          if (_matchStartTime != null)
                             Text(
-                              DateFormat('MMM dd, yyyy HH:mm').format(
-                                  (_match['startTime'] as Timestamp).toDate()),
+                              '${DateFormat('MMM dd, yyyy HH:mm').format(_matchStartTime!.toDate().add(const Duration(hours: 5, minutes: 30)))} IST',
                               style: GoogleFonts.poppins(
                                 color: Colors.white70,
                                 fontSize: 12,
@@ -913,19 +976,16 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                   ],
                 ),
               ),
-              // Main Score Display
               Expanded(
                 child: AnimationConfiguration.synchronized(
                   duration: const Duration(milliseconds: 1000),
                   child: Column(
                     children: [
                       const SizedBox(height: 20),
-                      // Player and Score Row
                       Expanded(
                         flex: 3,
                         child: Row(
                           children: [
-                            // Player 1 / Team 1
                             Expanded(
                               flex: 2,
                               child: Padding(
@@ -978,7 +1038,6 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                                 ),
                               ),
                             ),
-                            // Scores
                             Expanded(
                               flex: 3,
                               child: Column(
@@ -1102,7 +1161,6 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                                 ],
                               ),
                             ),
-                            // Player 2 / Team 2
                             Expanded(
                               flex: 2,
                               child: Padding(
@@ -1158,8 +1216,7 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                           ],
                         ),
                       ),
-                      // Previous Sets and Results
-                      if (currentGame > 1 || isCompleted)
+                      if (currentGame > 1)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           child: Column(
@@ -1178,7 +1235,7 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                                     ),
                                     if (winner != null)
                                       Text(
-                                        'Set ${index + 1} won by $winner (${team1Scores[index]}-${team2Scores[index]})',
+                                        'Set ${index + 1} won by $winner',
                                         style: GoogleFonts.poppins(
                                           color: Colors.greenAccent,
                                           fontSize: 12,
@@ -1191,18 +1248,17 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                             }),
                           ),
                         ),
-                      // Controls
                       if (!isCompleted)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           child: (!isLive)
                               ? Column(
                                   children: [
-                                    if (_countdownText != null)
+                                    if (_countdown != null)
                                       Padding(
                                         padding: const EdgeInsets.only(bottom: 8),
                                         child: Text(
-                                          'Countdown: $_countdownText',
+                                          'Countdown: $_countdown',
                                           style: GoogleFonts.poppins(
                                             color: Colors.cyanAccent,
                                             fontSize: 14,
@@ -1218,13 +1274,14 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                                       onPressed: _startMatch,
                                       isLoading: _isLoading,
                                     ),
+                                    const SizedBox(height: 8),
                                   ],
                                 )
                               : (_isSetComplete
                                   ? Column(
                                       children: [
                                         Text(
-                                          'Set $currentGame completed. Start Set ${currentGame + 1 <= 3 ? currentGame + 1 : ''} or end match?',
+                                          'Set $currentGame completed. Start Set ${currentGame + 1 <= 3 && team1Wins < 2 && team2Wins < 2 ? currentGame + 1 : ''} or end match?',
                                           style: GoogleFonts.poppins(
                                             color: Colors.white70,
                                             fontSize: 14,
@@ -1232,7 +1289,7 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                                           textAlign: TextAlign.center,
                                         ),
                                         const SizedBox(height: 16),
-                                        if (currentGame < 3)
+                                        if (currentGame < 3 && team1Wins < 2 && team2Wins < 2)
                                           _buildModernButton(
                                             text: _isLoading ? 'Starting...' : 'Start Set ${currentGame + 1}',
                                             gradient: const LinearGradient(
@@ -1241,59 +1298,52 @@ class _MatchControlPageState extends State<MatchControlPage> with SingleTickerPr
                                             onPressed: _startNextSet,
                                             isLoading: _isLoading,
                                           ),
+                                        const SizedBox(height: 16),
+                                        _buildModernButton(
+                                          text: _isLoading ? 'Ending...' : 'End Match',
+                                          gradient: const LinearGradient(
+                                            colors: [Colors.redAccent, Colors.red],
+                                          ),
+                                          onPressed: _endMatch,
+                                          isLoading: _isLoading,
+                                        ),
                                       ],
                                     )
-                                  : Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  : Column(
                                       children: [
-                                        // Team 1 Controls
-                                        Column(
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                           children: [
                                             _buildScoreButton(
                                               label: '+1',
                                               onPressed: () => _updateLiveScore(true),
-                                              isEnabled: true,
+                                              isEnabled: !_isLoading,
                                             ),
-                                            const SizedBox(height: 8),
                                             _buildScoreButton(
                                               label: '-1',
                                               onPressed: () => _decreaseScore(true),
-                                              isEnabled: team1Scores[currentGame - 1] > 0,
+                                              isEnabled: !_isLoading,
                                             ),
                                           ],
                                         ),
-                                        // Team 2 Controls
-                                        Column(
+                                        const SizedBox(height: 16),
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                           children: [
                                             _buildScoreButton(
                                               label: '+1',
                                               onPressed: () => _updateLiveScore(false),
-                                              isEnabled: true,
+                                              isEnabled: !_isLoading,
                                             ),
-                                            const SizedBox(height: 8),
                                             _buildScoreButton(
                                               label: '-1',
                                               onPressed: () => _decreaseScore(false),
-                                              isEnabled: team2Scores[currentGame - 1] > 0,
+                                              isEnabled: !_isLoading,
                                             ),
                                           ],
                                         ),
                                       ],
                                     )),
-                        ),
-                      // Winner Display
-                      if (isCompleted)
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            'Winner: ${_match['winner'] == 'team1' || _match['winner'] == 'player1' ? (widget.isDoubles ? _match['team1'].join(', ') : _match['player1']) : (widget.isDoubles ? _match['team2'].join(', ') : _match['player2'])}',
-                            style: GoogleFonts.poppins(
-                              color: Colors.greenAccent,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
                         ),
                     ],
                   ),

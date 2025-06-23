@@ -46,7 +46,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   DateTime? _selectedEndDate;
-  String _playStyle = 'Men\'s Singles'; // Changed default from 'Singles' to 'Men's Singles'
+  String _playStyle = 'Men\'s Singles';
   String _eventType = 'Knockout';
   bool _bringOwnEquipment = false;
   bool _costShared = false;
@@ -487,7 +487,8 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
         name: _nameController.text.trim(),
         venue: _venueController.text.trim(),
         city: _cityController.text.trim(),
-        eventDate: startDateTime,
+        startDate: _selectedDate!,
+        startTime: _selectedTime!,
         endDate: endDate,
         entryFee: double.tryParse(_entryFeeController.text.trim()) ?? 0.0,
         status: 'open',
@@ -911,7 +912,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
       'Men\'s Doubles',
       'Women\'s Doubles',
       'Mixed Doubles'
-    ]; // Updated to badminton-specific play styles
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

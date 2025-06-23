@@ -52,7 +52,8 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
   Timer? _debounceTimer;
   Timer? _countdownTimer;
   String? _countdown;
-  Timestamp? _eventDate;
+  Timestamp? _matchStartTime;
+  Timestamp? _tournamentStartTime;
 
   @override
   void initState() {
@@ -66,6 +67,20 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
     _initialUmpirePhone = _umpirePhoneController.text;
     _lastTeam1Score = _getCurrentScore(true);
     _lastTeam2Score = _getCurrentScore(false);
+    _matchStartTime = _match['startTime'] as Timestamp?;
+    _initializeTournamentStartTime().then((_) {
+      if (_matchStartTime == null) {
+        final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+        final defaultStart = now.add(const Duration(hours: 1));
+        print('No valid start time found, using default: $defaultStart');
+        setState(() {
+          _matchStartTime = Timestamp.fromDate(defaultStart);
+          _match['startTime'] = _matchStartTime;
+        });
+      }
+      setState(() {});
+      _startCountdown();
+    });
     _initializeServer();
     _listenToMatchUpdates();
     _animationController = AnimationController(
@@ -78,7 +93,43 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
     _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
     );
-    _startCountdown();
+  }
+
+  Future<void> _initializeTournamentStartTime() async {
+    final tournamentDoc = await FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(widget.tournamentId)
+        .get();
+    final data = tournamentDoc.data();
+    print('Tournament data: $data'); // Debug print
+    final startDate = data?['startDate'] as Timestamp?;
+    final startTimeData = data?['startTime'] as Map<String, dynamic>?;
+    print('startDate: $startDate, startTimeData: $startTimeData'); // Debug print
+
+    if (startDate != null && startTimeData != null) {
+      final hour = startTimeData['hour'] as int? ?? 0;
+      final minute = startTimeData['minute'] as int? ?? 0;
+      final tournamentStart = DateTime(
+        startDate.toDate().year,
+        startDate.toDate().month,
+        startDate.toDate().day,
+        hour,
+        minute,
+      ).toUtc();
+      print('Tournament start time: $tournamentStart');
+      if (_matchStartTime == null || _match['startTime'] == null) {
+        setState(() {
+          _matchStartTime = Timestamp.fromDate(tournamentStart);
+          _match['startTime'] = _matchStartTime;
+        });
+        print('Set matchStartTime to tournament time: ${_matchStartTime!.toDate()}');
+      } else {
+        print('Keeping existing match start time: ${_matchStartTime!.toDate()}');
+      }
+    }
+    setState(() {
+      _tournamentStartTime = startDate;
+    });
   }
 
   @override
@@ -92,9 +143,8 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
     super.dispose();
   }
 
-  void _startCountdown() async {
-    if (_match['liveScores']?['isLive'] == true ||
-        _match['completed'] == true) {
+  void _startCountdown() {
+    if (_match['liveScores']?['isLive'] == true || _match['completed'] == true) {
       setState(() {
         _countdown = null;
       });
@@ -102,22 +152,18 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
       return;
     }
 
-    final tournamentDoc =
-        await FirebaseFirestore.instance
-            .collection('tournaments')
-            .doc(widget.tournamentId)
-            .get();
-    final eventDate = tournamentDoc.data()?['eventDate'] as Timestamp?;
-
-    setState(() {
-      _eventDate = eventDate;
-      _countdown = eventDate == null ? 'Start time not scheduled' : null;
-    });
-
-    if (eventDate == null) {
+    if (_matchStartTime == null) {
+      setState(() {
+        _countdown = 'Start time not scheduled';
+      });
       _countdownTimer?.cancel();
+      print('Countdown set to: $_countdown, _matchStartTime: $_matchStartTime');
       return;
     }
+
+    setState(() {
+      _countdown = null; // Reset countdown before starting
+    });
 
     _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -126,9 +172,12 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
         return;
       }
 
-      final now = DateTime.now();
-      final startTime = eventDate.toDate();
+      final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30)); // Convert to IST
+      print('Local Now (IST): $now');
+      final startTime = _matchStartTime!.toDate().toUtc().add(const Duration(hours: 5, minutes: 30)); // Convert to IST
       final difference = startTime.difference(now);
+
+      print('Now (IST): $now, StartTime (IST): $startTime, Difference: $difference');
 
       if (difference.isNegative) {
         setState(() {
@@ -152,15 +201,13 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
     });
   }
 
-  Future<void> _updateEventDate() async {
-    if (_isLoading ||
-        _match['liveScores']?['isLive'] == true ||
-        _match['completed'] == true) {
+  Future<void> _updateMatchStartTime() async {
+    if (_isLoading || _match['liveScores']?['isLive'] == true || _match['completed'] == true) {
       return;
     }
 
-    final now = DateTime.now();
-    final initialDate = _eventDate?.toDate() ?? now;
+    final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+    final initialDate = _matchStartTime?.toDate() ?? now;
     final newDate = await showDatePicker(
       context: context,
       initialDate: initialDate,
@@ -190,13 +237,24 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
     });
 
     try {
+      final tournamentDoc = await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournamentId)
+          .get();
+      final updatedMatches = List<Map<String, dynamic>>.from(tournamentDoc.data()!['matches']);
+      updatedMatches[widget.matchIndex] = {
+        ..._match,
+        'startTime': Timestamp.fromDate(newDateTime),
+      };
+
       await FirebaseFirestore.instance
           .collection('tournaments')
           .doc(widget.tournamentId)
-          .update({'eventDate': Timestamp.fromDate(newDateTime)});
+          .update({'matches': updatedMatches});
 
       setState(() {
-        _eventDate = Timestamp.fromDate(newDateTime);
+        _match = updatedMatches[widget.matchIndex];
+        _matchStartTime = Timestamp.fromDate(newDateTime);
         _startCountdown();
       });
 
@@ -204,7 +262,7 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
         context: context,
         type: ToastificationType.success,
         title: const Text('Start Time Updated'),
-        description: const Text('Tournament start time has been updated.'),
+        description: const Text('Match start time has been updated.'),
         autoCloseDuration: const Duration(seconds: 2),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
@@ -343,7 +401,9 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
               }
               setState(() {
                 _match = newMatch;
-                _eventDate = data['eventDate'] as Timestamp?;
+                if (_matchStartTime == null || _match['startTime'] == _matchStartTime) {
+                  _matchStartTime = _match['startTime'] as Timestamp?;
+                }
                 _umpireNameController.text = _match['umpire']?['name'] ?? '';
                 _umpireEmailController.text = _match['umpire']?['email'] ?? '';
                 _umpirePhoneController.text = _match['umpire']?['phone'] ?? '';
@@ -1001,11 +1061,11 @@ Error details: $e''',
                   children:
                       isRequired
                           ? [
-                            const TextSpan(
-                              text: ' *',
-                              style: TextStyle(color: Colors.redAccent),
-                            ),
-                          ]
+                              const TextSpan(
+                                text: ' *',
+                                style: TextStyle(color: Colors.redAccent),
+                              ),
+                            ]
                           : [],
                 ),
               ),
@@ -1066,8 +1126,8 @@ Error details: $e''',
                 gradient:
                     isLoading || onPressed == null
                         ? LinearGradient(
-                          colors: [Colors.grey.shade600, Colors.grey.shade700],
-                        )
+                            colors: [Colors.grey.shade600, Colors.grey.shade700],
+                          )
                         : gradient,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
@@ -1082,21 +1142,21 @@ Error details: $e''',
               child:
                   isLoading
                       ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
                       : Text(
-                        text,
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
+                          text,
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
                         ),
-                      ),
             ),
           ),
         ),
@@ -1226,7 +1286,6 @@ Error details: $e''',
           [0, 0, 0],
     );
 
-    
     int team1Wins = 0;
     int team2Wins = 0;
     for (int i = 0; i < currentGame; i++) {
@@ -1334,41 +1393,75 @@ Error details: $e''',
                                 label: 'Round',
                                 value: 'Round ${_match['round']}',
                               ),
-                              _buildDetailRow(
-                                icon: Icons.person,
-                                label: widget.isDoubles ? 'Team 1' : 'Player 1',
-                                value:
-                                    widget.isDoubles
-                                        ? _match['team1'].join(', ')
-                                        : _match['player1'],
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      widget.isDoubles
+                                          ? _match['team1'].join(', ')
+                                          : _match['player1'],
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'vs',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.cyanAccent,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      widget.isDoubles
+                                          ? _match['team2'].join(', ')
+                                          : _match['player2'],
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              _buildDetailRow(
-                                icon: Icons.person,
-                                label: widget.isDoubles ? 'Team 2' : 'Player 2',
-                                value:
-                                    widget.isDoubles
-                                        ? _match['team2'].join(', ')
-                                        : _match['player2'],
-                              ),
-                              if (_eventDate != null)
+                              if (_matchStartTime != null)
                                 _buildDetailRow(
                                   icon: Icons.timer,
-                                  label: 'Scheduled Start Time',
-                                  value: DateFormat(
-                                    'MMM dd, yyyy HH:mm',
-                                  ).format(_eventDate!.toDate()),
+                                  label: 'Start Time',
+                                  value: DateFormat('MMM dd, yyyy HH:mm')
+                                      .format(_matchStartTime!.toDate()),
+                                ),
+                              if (_tournamentStartTime != null)
+                                _buildDetailRow(
+                                  icon: Icons.calendar_today,
+                                  label: 'Tournament Start',
+                                  value: DateFormat('MMM dd, yyyy HH:mm')
+                                      .format(_tournamentStartTime!.toDate()),
                                 ),
                               if (!isLive && !isCompleted)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 12),
-                                  child: Text(
-                                    _countdown ?? 'Start time not scheduled',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.cyanAccent,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    textAlign: TextAlign.center,
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text('Starts in: '),
+                                      Text(
+                                        _countdown ?? 'Start time not scheduled',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.cyanAccent,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ],
                                   ),
                                 ),
                               if (widget.isCreator && !isLive && !isCompleted)
@@ -1383,7 +1476,7 @@ Error details: $e''',
                                       ],
                                     ),
                                     isLoading: _isLoading,
-                                    onPressed: _updateEventDate,
+                                    onPressed: _updateMatchStartTime,
                                   ),
                                 ),
                               if (_match['umpire']?['name'] != null && isLive)
@@ -1392,13 +1485,13 @@ Error details: $e''',
                                   label: 'Umpire',
                                   value: _match['umpire']['name'],
                                 ),
-                              if (_match['umpire']?['email'] != null && isLive)
+                              if (widget.isCreator && _match['umpire']?['email'] != null && isLive)
                                 _buildDetailRow(
                                   icon: Icons.email,
                                   label: 'Umpire Email',
                                   value: _match['umpire']['email'],
                                 ),
-                              if (_match['umpire']?['phone'] != null && isLive)
+                              if (widget.isCreator && _match['umpire']?['phone'] != null && isLive)
                                 _buildDetailRow(
                                   icon: Icons.phone,
                                   label: 'Umpire Phone',
@@ -1713,7 +1806,7 @@ Error details: $e''',
                                   ),
                                 const SizedBox(height: 20),
                                 Text(
-                                  'Previous Games',
+                                  'Previous Sets',
                                   style: GoogleFonts.poppins(
                                     color: Colors.cyanAccent,
                                     fontSize: 16,
@@ -1723,6 +1816,23 @@ Error details: $e''',
                                 ),
                                 const SizedBox(height: 10),
                                 ...List.generate(currentGame - 1, (index) {
+                                  final winner = team1Scores[index] >= 21 &&
+                                          (team1Scores[index] -
+                                                  team2Scores[index] >=
+                                              2) ||
+                                          team1Scores[index] == 30
+                                      ? (widget.isDoubles
+                                          ? _match['team1'].join(', ')
+                                          : _match['player1'])
+                                      : (team2Scores[index] >= 21 &&
+                                              (team2Scores[index] -
+                                                      team1Scores[index] >=
+                                                  2) ||
+                                          team2Scores[index] == 30
+                                          ? (widget.isDoubles
+                                              ? _match['team2'].join(', ')
+                                              : _match['player2'])
+                                          : 'No winner');
                                   return Padding(
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 4,
@@ -1732,7 +1842,7 @@ Error details: $e''',
                                           MainAxisAlignment.spaceBetween,
                                       children: [
                                         Text(
-                                          'Game ${index + 1}',
+                                          'Set ${index + 1}',
                                           style: GoogleFonts.poppins(
                                             color: Colors.white70,
                                             fontSize: 14,
@@ -1743,6 +1853,14 @@ Error details: $e''',
                                           style: GoogleFonts.poppins(
                                             color: Colors.white,
                                             fontSize: 14,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Winner: $winner',
+                                          style: GoogleFonts.poppins(
+                                            color: Colors.greenAccent,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
                                           ),
                                         ),
                                       ],
@@ -1762,31 +1880,36 @@ Error details: $e''',
                                   icon: Icons.person,
                                   keyboardType: TextInputType.name,
                                 ),
-                                const SizedBox(height: 16),
-                                _buildModernTextField(
-                                  controller: _umpireEmailController,
-                                  label: 'Umpire Email',
-                                  icon: Icons.email,
-                                  keyboardType: TextInputType.emailAddress,
-                                  isRequired: true,
-                                  onChanged: (value) {
-                                    _debounceTimer?.cancel();
-                                    _debounceTimer = Timer(
-                                      const Duration(milliseconds: 500),
-                                      () {
-                                        _fetchUserData(value.trim());
-                                      },
-                                    );
-                                  },
-                                ),
-                                const SizedBox(height: 16),
-                                _buildModernTextField(
-                                  controller: _umpirePhoneController,
-                                  label: 'Umpire Phone',
-                                  icon: Icons.phone,
-                                  keyboardType: TextInputType.phone,
-                                  maxLength: 12,
-                                ),
+                                if (widget.isCreator)
+                                  Column(
+                                    children: [
+                                      const SizedBox(height: 16),
+                                      _buildModernTextField(
+                                        controller: _umpireEmailController,
+                                        label: 'Umpire Email',
+                                        icon: Icons.email,
+                                        keyboardType: TextInputType.emailAddress,
+                                        isRequired: true,
+                                        onChanged: (value) {
+                                          _debounceTimer?.cancel();
+                                          _debounceTimer = Timer(
+                                            const Duration(milliseconds: 500),
+                                            () {
+                                              _fetchUserData(value.trim());
+                                            },
+                                          );
+                                        },
+                                      ),
+                                      const SizedBox(height: 16),
+                                      _buildModernTextField(
+                                        controller: _umpirePhoneController,
+                                        label: 'Umpire Phone',
+                                        icon: Icons.phone,
+                                        keyboardType: TextInputType.phone,
+                                        maxLength: 12,
+                                      ),
+                                    ],
+                                  ),
                                 const SizedBox(height: 20),
                                 _buildModernButton(
                                   text:

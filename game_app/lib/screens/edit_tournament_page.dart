@@ -1,14 +1,10 @@
-// ignore_for_file: unused_import
-
 import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:game_app/models/tournament.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:toastification/toastification.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 
 class EditTournamentPage extends StatefulWidget {
@@ -92,8 +88,8 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
 '''
         : widget.tournament.rules;
     _maxParticipantsController.text = widget.tournament.maxParticipants.toString();
-    _selectedDate = widget.tournament.eventDate;
-    _selectedTime = TimeOfDay(hour: widget.tournament.eventDate.hour, minute: widget.tournament.eventDate.minute);
+    _selectedDate = widget.tournament.startDate;
+    _selectedTime = TimeOfDay.fromDateTime(widget.tournament.startDate);
     _selectedEndDate = widget.tournament.endDate;
     _gameFormat = _gameFormatOptions.contains(widget.tournament.gameFormat)
         ? widget.tournament.gameFormat
@@ -199,8 +195,6 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     }
   }
 
-
-
   Future<void> _validateCityWithGeocoding(String city) async {
     if (city.trim().isEmpty) {
       if (mounted) {
@@ -302,21 +296,20 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
       return;
     }
 
-    final eventDateTime = DateTime(
+    final startDateTime = DateTime(
       _selectedDate.year,
       _selectedDate.month,
       _selectedDate.day,
       _selectedTime.hour,
       _selectedTime.minute,
     );
-
     final endDate = DateTime(
       _selectedEndDate!.year,
       _selectedEndDate!.month,
       _selectedEndDate!.day,
     );
 
-    if (endDate.isBefore(eventDateTime)) {
+    if (endDate.isBefore(startDateTime)) {
       _showErrorToast('Invalid Date Range', 'End date must be on or after start date.');
       return;
     }
@@ -331,7 +324,8 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         name: _nameController.text.trim(),
         venue: _venueController.text.trim(),
         city: _cityController.text.trim(),
-        eventDate: eventDateTime,
+        startDate: startDateTime,
+        startTime: _selectedTime, // Added required startTime argument
         endDate: endDate,
         entryFee: double.tryParse(_entryFeeController.text.trim()) ?? 0.0,
         status: widget.tournament.status,

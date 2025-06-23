@@ -135,11 +135,11 @@ class JoinedTournamentsPage extends StatelessWidget {
             itemCount: tournaments.length,
             itemBuilder: (context, index) {
               final tournament = tournaments[index];
-              final isPast = tournament.eventDate.isBefore(DateTime.now());
+              final isPast = tournament.endDate!.isBefore(DateTime.now());
               final isCreator = tournament.createdBy == userId;
 
               // Check if withdraw option should be available (e.g., at least 3 days before event)
-              final withdrawDeadline = tournament.eventDate.subtract(const Duration(days: 3));
+              final withdrawDeadline = tournament.startDate.subtract(const Duration(days: 3));
               final canWithdraw = DateTime.now().isBefore(withdrawDeadline) && !isPast;
 
               return AnimatedContainer(
@@ -188,7 +188,7 @@ class JoinedTournamentsPage extends StatelessWidget {
                                         style: GoogleFonts.poppins(color: Colors.white70),
                                       ),
                                       Text(
-                                        'Date: ${DateFormat('MMM dd, yyyy').format(tournament.eventDate)}',
+                                        'Date: ${DateFormat('MMM dd, yyyy').format(tournament.startDate)}',
                                         style: GoogleFonts.poppins(color: Colors.white70),
                                       ),
                                       Text(
@@ -282,7 +282,7 @@ class JoinedTournamentsPage extends StatelessWidget {
                                     style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
                                   ),
                                   Text(
-                                    'Date: ${DateFormat('MMM dd, yyyy').format(tournament.eventDate)}',
+                                    'Date: ${DateFormat('MMM dd, yyyy').format(tournament.startDate)}',
                                     style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
                                   ),
                                   Text(

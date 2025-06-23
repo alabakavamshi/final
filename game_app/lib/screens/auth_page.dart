@@ -29,7 +29,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   late final TextEditingController _passwordController;
   late final TextEditingController _confirmPasswordController;
   late final TextEditingController _otpController;
-  AuthBloc? _authBloc; // Cached AuthBloc reference
+  AuthBloc? _authBloc;
 
   bool _isSignup = false;
   bool _usePhone = false;
@@ -39,8 +39,6 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   final List<bool> _authModeSelection = [true, false];
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
-  bool _obscurePhonePassword = true;
-  bool _obscurePhoneConfirmPassword = true;
   bool _hasMinLength = false;
   bool _hasUppercase = false;
   bool _hasNumber = false;
@@ -112,7 +110,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _authBloc = context.read<AuthBloc>(); // Cache AuthBloc
+    _authBloc = context.read<AuthBloc>();
   }
 
   @override
@@ -356,7 +354,6 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                 children: [
                   ScaleTransition(
                     scale: Tween(begin: 0.0, end: 1.0).animate(
- 
                       CurvedAnimation(
                         parent: _verificationController,
                         curve: const Interval(
@@ -480,7 +477,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       if (!userDoc.exists) {
         debugPrint('User document not found for UID: $uid, waiting for profile creation');
-        return; // Delay navigation until profile is created
+        return;
       }
 
       final data = userDoc.data()!;
@@ -525,7 +522,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   }
 
   Future<void> _handleAuthButtonPress() async {
-    if (!mounted || _isPhoneLinkingInProgress) return;
+    if (!mounted || _isPhoneLinkingInProgress || _authBloc == null) return;
     try {
       if (_isSignup && _selectedRole == null) {
         toastification.show(
@@ -558,6 +555,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   }
 
   Future<void> _handleEmailAuth() async {
+    if (_authBloc == null) return;
     try {
       final email = _emailController.text.trim();
       final password = _passwordController.text;
@@ -652,7 +650,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
         }
 
         setState(() => _isSignupFromState = true);
-        _authBloc?.add(
+        _authBloc!.add(
           AuthSignupEvent(
             email: email,
             password: password,
@@ -661,7 +659,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
         );
       } else {
         setState(() => _isSignupFromState = false);
-        _authBloc?.add(
+        _authBloc!.add(
           AuthLoginEvent(email: email, password: password, role: widget.role),
         );
       }
@@ -680,7 +678,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   }
 
   Future<void> _handlePhoneAuth() async {
-    if (!mounted || _isPhoneLinkingInProgress) return;
+    if (!mounted || _isPhoneLinkingInProgress || _authBloc == null) return;
     setState(() => _isPhoneLinkingInProgress = true);
     try {
       if (!_showOtpField) {
@@ -701,7 +699,6 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
           return;
         }
 
-        // Check phone number existence
         final isPhoneUnique = await _checkFieldUniqueness('phone', phone);
         if (_isSignup && !isPhoneUnique) {
           if (mounted) {
@@ -742,7 +739,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                     .signInWithCredential(credential);
                 if (_isSignup) {
                   setState(() => _isSignupFromState = true);
-                  _authBloc?.add(
+                  _authBloc!.add(
                     AuthRefreshProfileEvent(userCredential.user!.uid),
                   );
                 } else {
@@ -820,7 +817,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
               .signInWithCredential(credential);
           if (_isSignup) {
             setState(() => _isSignupFromState = true);
-            _authBloc?.add(
+            _authBloc!.add(
               AuthRefreshProfileEvent(userCredential.user!.uid),
             );
           } else {
@@ -857,135 +854,623 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   }
 
   Future<void> _collectPhoneSignupDetails(
-    BuildContext context,
-    String uid,
-    String role,
-  ) async {
-    if (!mounted || _isDialogOpen) {
-      debugPrint('Dialog already open or widget not mounted, skipping dialog for UID: $uid');
-      return;
-    }
-    setState(() {
-      _isDialogOpen = true;
-      _signupStep = 0;
-    });
-    debugPrint('Showing phone signup dialog for UID: $uid with role: $role');
+  BuildContext context,
+  String uid,
+  String role,
+) async {
+  if (!mounted || _isDialogOpen || _authBloc == null) {
+    debugPrint('Dialog already open or widget not mounted, skipping dialog for UID: $uid');
+    return;
+  }
+  setState(() {
+    _isDialogOpen = true;
+    _signupStep = 0;
+  });
+  debugPrint('Showing phone signup dialog for UID: $uid with role: $role');
 
-    final emailController = TextEditingController();
-    final passwordController = TextEditingController();
-    final confirmPasswordController = TextEditingController();
-    final firstNameController = TextEditingController();
-    final lastNameController = TextEditingController();
+  // Initialize controllers at the method level
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
+  final confirmPasswordController = TextEditingController();
+  final firstNameController = TextEditingController();
+  final lastNameController = TextEditingController();
+  bool localObscurePhonePassword = true;
+  bool localObscurePhoneConfirmPassword = true;
+  bool isDialogClosing = false; // Flag to prevent setDialogState after dismissal
 
-    try {
-      await showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            if (!mounted) return const SizedBox.shrink();
+  try {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          if (!mounted || isDialogClosing) return const SizedBox.shrink();
 
-            return Dialog(
-              shape: RoundedRectangleBorder(
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B263B),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1B263B),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                padding: const EdgeInsets.all(20),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildStepIndicator(0, "Basic Info"),
-                          _buildStepConnector(),
-                          _buildStepIndicator(1, "Verification"),
-                          _buildStepConnector(),
-                          _buildStepIndicator(2, "Gender"),
-                          _buildStepConnector(),
-                          _buildStepIndicator(3, "Profile"),
-                        ],
+              padding: const EdgeInsets.all(20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildStepIndicator(0, "Basic Info"),
+                        _buildStepConnector(),
+                        _buildStepIndicator(1, "Verification"),
+                        _buildStepConnector(),
+                        _buildStepIndicator(2, "Gender"),
+                        _buildStepConnector(),
+                        _buildStepIndicator(3, "Profile"),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    if (_signupStep == 0) ...[
+                      Text(
+                        'Step 1: Basic Information',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                        ),
                       ),
                       const SizedBox(height: 20),
+                      _buildModernTextField(
+                        controller: emailController,
+                        label: 'Email',
+                        icon: Icons.email,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildModernTextField(
+                        controller: passwordController,
+                        label: 'Password',
+                        icon: Icons.lock,
+                        obscureText: localObscurePhonePassword,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            localObscurePhonePassword
+                                ? Icons.visibility
+                                : Icons.visibility_off,
+                            color: Colors.white70,
+                          ),
+                          onPressed: () => setDialogState(
+                              () => localObscurePhonePassword = !localObscurePhonePassword),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _buildModernTextField(
+                        controller: confirmPasswordController,
+                        label: 'Confirm Password',
+                        icon: Icons.lock,
+                        obscureText: localObscurePhoneConfirmPassword,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            localObscurePhoneConfirmPassword
+                                ? Icons.visibility
+                                : Icons.visibility_off,
+                            color: Colors.white70,
+                          ),
+                          onPressed: () => setDialogState(
+                              () => localObscurePhoneConfirmPassword = !localObscurePhoneConfirmPassword),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _buildModernTextField(
+                        controller: firstNameController,
+                        label: 'First Name',
+                        icon: Icons.person,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildModernTextField(
+                        controller: lastNameController,
+                        label: 'Last Name',
+                        icon: Icons.person,
+                      ),
+                    ] else if (_signupStep == 1) ...[
+                      Text(
+                        'Step 2: Verify Email',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'A verification email has been sent to ${emailController.text.trim()}. Please verify it to proceed.',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white70,
+                          fontSize: 16,
+                          letterSpacing: 1,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _buildModernButton(
+                            text: 'Resend Email',
+                            gradient: const LinearGradient(
+                              colors: [Colors.orangeAccent, Colors.orange],
+                            ),
+                            onPressed: () async {
+                              final user = firebase_auth.FirebaseAuth.instance.currentUser;
+                              if (user != null) {
+                                await _sendVerificationEmail(user);
+                              }
+                            },
+                          ),
+                          _buildModernButton(
+                            text: _isVerificationInProgress ? 'Verifying...' : 'I Have Verified',
+                            gradient: const LinearGradient(
+                              colors: [Colors.cyanAccent, Colors.blueAccent],
+                            ),
+                            onPressed: _isVerificationInProgress
+                                ? null
+                                : () async {
+                                    final user = firebase_auth.FirebaseAuth.instance.currentUser;
+                                    if (user != null) {
+                                      bool isVerified = await _checkEmailVerification(user);
+                                      if (isVerified && mounted && !isDialogClosing) {
+                                        setDialogState(() {
+                                          _signupStep++;
+                                          debugPrint('Advanced to step $_signupStep');
+                                        });
+                                      }
+                                    }
+                                  },
+                          ),
+                        ],
+                      ),
+                    ] else if (_signupStep == 2) ...[
+                      Text(
+                        'Step 3: Select Gender',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Column(
+                        children: _genders.map((gender) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: ListTile(
+                              title: Text(
+                                gender,
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                ),
+                              ),
+                              leading: Radio<String>(
+                                value: gender,
+                                groupValue: _selectedGender,
+                                onChanged: (String? value) {
+                                  setDialogState(() {
+                                    _selectedGender = value;
+                                  });
+                                },
+                                fillColor: MaterialStateProperty.resolveWith<Color>(
+                                  (Set<MaterialState> states) {
+                                    if (states.contains(MaterialState.selected)) {
+                                      return Colors.cyanAccent;
+                                    }
+                                    return Colors.white;
+                                  },
+                                ),
+                              ),
+                              tileColor: Colors.white.withOpacity(0.1),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ] else if (_signupStep == 3) ...[
+                      Text(
+                        'Step 4: Select Profile Image',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 20,
+                        ),
+                        itemCount: _profileImages.length,
+                        itemBuilder: (context, index) {
+                          return GestureDetector(
+                            onTap: () {
+                              setDialogState(() {
+                                _selectedProfileImageIndex = index;
+                              });
+                            },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: _selectedProfileImageIndex == index
+                                      ? Colors.cyanAccent
+                                      : Colors.transparent,
+                                  width: 3,
+                                ),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.asset(
+                                  _profileImages[index],
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        if (_signupStep > 0)
+                          _buildModernButton(
+                            text: 'Back',
+                            gradient: const LinearGradient(
+                              colors: [Colors.grey, Colors.grey],
+                            ),
+                            onPressed: () {
+                              setDialogState(() {
+                                if (_signupStep == 1) {
+                                  setState(() => _isVerificationInProgress = false);
+                                }
+                                _signupStep--;
+                                debugPrint('Back to step $_signupStep');
+                              });
+                            },
+                          ),
+                        _buildModernButton(
+                          text: _signupStep < 3 ? 'Next' : 'Complete',
+                          gradient: const LinearGradient(
+                            colors: [Colors.cyanAccent, Colors.blueAccent],
+                          ),
+                          onPressed: () async {
+                            if (isDialogClosing) return; // Prevent actions after dismissal
+                            if (_signupStep < 3) {
+                              if (_signupStep == 0) {
+                                if (emailController.text.isEmpty ||
+                                    passwordController.text.isEmpty ||
+                                    confirmPasswordController.text.isEmpty ||
+                                    firstNameController.text.isEmpty ||
+                                    lastNameController.text.isEmpty) {
+                                  toastification.show(
+                                    context: dialogContext,
+                                    type: ToastificationType.error,
+                                    title: const Text('Validation Error'),
+                                    description: const Text('Please fill all fields'),
+                                    autoCloseDuration: const Duration(seconds: 2),
+                                  );
+                                  return;
+                                }
+                                if (passwordController.text != confirmPasswordController.text) {
+                                  toastification.show(
+                                    context: dialogContext,
+                                    type: ToastificationType.error,
+                                    title: const Text('Validation Error'),
+                                    description: const Text('Passwords do not match'),
+                                    autoCloseDuration: const Duration(seconds: 2),
+                                  );
+                                  return;
+                                }
+                                final emailError = _validateEmail(emailController.text.trim());
+                                if (emailError != null) {
+                                  toastification.show(
+                                    context: dialogContext,
+                                    type: ToastificationType.error,
+                                    title: const Text('Validation Error'),
+                                    description: Text(emailError),
+                                    autoCloseDuration: const Duration(seconds: 2),
+                                  );
+                                  return;
+                                }
+                                final passwordError = _validatePassword(passwordController.text);
+                                if (passwordError != null) {
+                                  toastification.show(
+                                    context: dialogContext,
+                                    type: ToastificationType.error,
+                                    title: const Text('Validation Error'),
+                                    description: Text(passwordError),
+                                    autoCloseDuration: const Duration(seconds: 2),
+                                  );
+                                  return;
+                                }
+                                final isEmailUnique =
+                                    await _checkFieldUniqueness('email', emailController.text.trim());
+                                if (!isEmailUnique) {
+                                  toastification.show(
+                                    context: dialogContext,
+                                    type: ToastificationType.error,
+                                    title: const Text('Validation Error'),
+                                    description: const Text('Email already in use'),
+                                    autoCloseDuration: const Duration(seconds: 2),
+                                  );
+                                  return;
+                                }
+                                try {
+                                  final user = firebase_auth.FirebaseAuth.instance.currentUser;
+                                  if (user != null) {
+                                    final credential = firebase_auth.EmailAuthProvider.credential(
+                                      email: emailController.text.trim(),
+                                      password: passwordController.text,
+                                    );
+                                    await user.linkWithCredential(credential);
+                                    await _sendVerificationEmail(user);
+                                    setDialogState(() {
+                                      _signupStep++;
+                                      debugPrint('Advanced to step $_signupStep');
+                                    });
+                                  }
+                                } catch (e, stackTrace) {
+                                  debugPrint('Error linking email: $e\nStack: $stackTrace');
+                                  toastification.show(
+                                    context: dialogContext,
+                                    type: ToastificationType.error,
+                                    title: const Text('Error'),
+                                    description: Text('Failed to link email: $e'),
+                                    autoCloseDuration: const Duration(seconds: 2),
+                                  );
+                                  return;
+                                }
+                              } else if (_signupStep == 2 && _selectedGender == null) {
+                                toastification.show(
+                                  context: dialogContext,
+                                  type: ToastificationType.error,
+                                  title: const Text('Validation Error'),
+                                  description: const Text('Please select your gender'),
+                                  autoCloseDuration: const Duration(seconds: 2),
+                                );
+                                return;
+                              } else {
+                                setDialogState(() {
+                                  _signupStep++;
+                                  debugPrint('Advanced to step $_signupStep');
+                                });
+                              }
+                            } else {
+                              if (_selectedProfileImageIndex == null) {
+                                toastification.show(
+                                  context: dialogContext,
+                                  type: ToastificationType.error,
+                                  title: const Text('Validation Error'),
+                                  description: const Text('Please select a profile image'),
+                                  autoCloseDuration: const Duration(seconds: 2),
+                                );
+                                return;
+                              }
+                              try {
+                                isDialogClosing = true; // Set flag before dismissal
+                                final location = await _fetchUserLocation();
+                                await FirebaseFirestore.instance.collection('users').doc(uid).set({
+                                  'email': emailController.text.trim(),
+                                  'firstName': firstNameController.text.trim(),
+                                  'lastName': lastNameController.text.trim(),
+                                  'phone': _normalizePhoneNumber(_phoneController.text.trim()),
+                                  'role': role,
+                                  'gender': _selectedGender,
+                                  'profileImage': _profileImages[_selectedProfileImageIndex!],
+                                  'location': location,
+                                  'createdAt': FieldValue.serverTimestamp(),
+                                });
+                                debugPrint('User details saved for UID: $uid with role: $role');
+                                Navigator.pop(dialogContext);
+                                if (mounted) {
+                                  _authBloc!.add(
+                                    AuthRefreshProfileEvent(uid),
+                                  );
+                                  _navigateBasedOnRole(uid);
+                                }
+                              } catch (e, stackTrace) {
+                                debugPrint('Error saving profile: $e\n$stackTrace');
+                                isDialogClosing = false; // Reset flag on error
+                                toastification.show(
+                                  context: dialogContext,
+                                  type: ToastificationType.error,
+                                  title: const Text('Error'),
+                                  description: Text('Failed to save profile: $e'),
+                                  autoCloseDuration: const Duration(seconds: 2),
+                                );
+                              }
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+           ) );
+          },
+        ),
+      );
+  } catch (e, stackTrace) {
+    debugPrint('collectPhoneSignupDetails error: $e\nStack: $stackTrace');
+    if (mounted) {
+      toastification.show(
+        context: context,
+        type: ToastificationType.error,
+        title: const Text('Error'),
+        description: Text('Failed to collect phone signup details: $e'),
+        autoCloseDuration: const Duration(seconds: 2),
+      );
+    }
+  } finally {
+    // Dispose controllers
+    emailController.dispose();
+    passwordController.dispose();
+    confirmPasswordController.dispose();
+    firstNameController.dispose();
+    lastNameController.dispose();
+    if (mounted) {
+      setState(() {
+        _isDialogOpen = false;
+        _isSignupFromState = false;
+        _signupStep = 0;
+        _selectedGender = null;
+        _selectedProfileImageIndex = null;
+      });
+    }
+    debugPrint('Dialog closed for UID: $uid');
+  }
+}
 
-                      if (_signupStep == 0) ...[
-                        Text(
-                          'Step 1: Basic Information',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                          ),
+  Future<void> _collectEmailSignupDetails(
+  BuildContext context,
+  String uid,
+) async {
+  if (!mounted || _isDialogOpen || _authBloc == null) {
+    debugPrint('Dialog already open or widget not mounted, skipping email dialog for UID: $uid');
+    return;
+  }
+  setState(() {
+    _isDialogOpen = true;
+    _signupStep = 0;
+  });
+  debugPrint('Showing email signup dialog for UID: $uid with role: $_selectedRole');
+
+  // Initialize controllers at the method level
+  final firstNameController = TextEditingController();
+  final lastNameController = TextEditingController();
+  final phoneController = TextEditingController();
+  final otpController = TextEditingController();
+  String? verificationId;
+  bool isPhoneVerifying = false;
+  bool isDialogClosing = false; // Flag to prevent setDialogState after dismissal
+
+  try {
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          if (!mounted || isDialogClosing) return const SizedBox.shrink();
+
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B263B),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding: const EdgeInsets.all(20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildStepIndicator(0, "Basic Info"),
+                        _buildStepConnector(),
+                        _buildStepIndicator(1, "Phone Verify"),
+                        _buildStepConnector(),
+                        _buildStepIndicator(2, "Gender"),
+                        _buildStepConnector(),
+                        _buildStepIndicator(3, "Profile"),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    if (_signupStep == 0) ...[
+                      Text(
+                        'Step 1: Basic Information',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
                         ),
-                        const SizedBox(height: 20),
-                        _buildModernTextField(
-                          controller: emailController,
-                          label: 'Email',
-                          icon: Icons.email,
-                        ),
-                        const SizedBox(height: 16),
-                        _buildModernTextField(
-                          controller: passwordController,
-                          label: 'Password',
-                          icon: Icons.lock,
-                          obscureText: _obscurePhonePassword,
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePhonePassword
-                                  ? Icons.visibility
-                                  : Icons.visibility_off,
-                              color: Colors.white70,
+                      ),
+                      const SizedBox(height: 20),
+                      _buildModernTextField(
+                        controller: firstNameController,
+                        label: 'First Name',
+                        icon: Icons.person,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildModernTextField(
+                        controller: lastNameController,
+                        label: 'Last Name',
+                        icon: Icons.person,
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 16,
                             ),
-                            onPressed: () => setDialogState(
-                                () => _obscurePhonePassword = !_obscurePhonePassword),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        _buildModernTextField(
-                          controller: confirmPasswordController,
-                          label: 'Confirm Password',
-                          icon: Icons.lock,
-                          obscureText: _obscurePhoneConfirmPassword,
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePhoneConfirmPassword
-                                  ? Icons.visibility
-                                  : Icons.visibility_off,
-                              color: Colors.white70,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.1),
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(12),
+                                bottomLeft: Radius.circular(12),
+                              ),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.2),
+                              ),
                             ),
-                            onPressed: () => setDialogState(
-                                () => _obscurePhoneConfirmPassword = !_obscurePhoneConfirmPassword),
+                            child: Text(
+                              '+91',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        _buildModernTextField(
-                          controller: firstNameController,
-                          label: 'First Name',
-                          icon: Icons.person,
-                        ),
-                        const SizedBox(height: 16),
-                        _buildModernTextField(
-                          controller: lastNameController,
-                          label: 'Last Name',
-                          icon: Icons.person,
-                        ),
-                      ] else if (_signupStep == 1) ...[
-                        Text(
-                          'Step 2: Verify Email',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
+                          const SizedBox(width: 1),
+                          Expanded(
+                            child: _buildModernTextField(
+                              controller: phoneController,
+                              label: 'Phone Number (Optional)',
+                              icon: Icons.phone,
+                              keyboardType: TextInputType.phone,
+                              isPhone: true,
+                            ),
                           ),
+                        ],
+                      ),
+                    ] else if (_signupStep == 1) ...[
+                      Text(
+                        'Step 2: Verify Phone',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
                         ),
-                        const SizedBox(height: 20),
+                      ),
+                      const SizedBox(height: 20),
+                      if (verificationId == null) ...[
                         Text(
-                          'A verification email has been sent to ${emailController.text.trim()}. Please verify it to proceed.',
+                          'A verification code will be sent to ${_normalizePhoneNumber(phoneController.text.trim())}.',
                           style: GoogleFonts.poppins(
                             color: Colors.white70,
                             fontSize: 16,
@@ -994,846 +1479,387 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 20),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            _buildModernButton(
-                              text: 'Resend Email',
-                              gradient: const LinearGradient(
-                                colors: [Colors.orangeAccent, Colors.orange],
-                              ),
-                              onPressed: () async {
-                                final user = firebase_auth.FirebaseAuth.instance.currentUser;
-                                if (user != null) {
-                                  await _sendVerificationEmail(user);
-                                }
-                              },
-                            ),
-                            _buildModernButton(
-                              text: _isVerificationInProgress ? 'Verifying...' : 'I Have Verified',
-                              gradient: const LinearGradient(
-                                colors: [Colors.cyanAccent, Colors.blueAccent],
-                              ),
-                              onPressed: _isVerificationInProgress
-                                  ? null
-                                  : () async {
+                        _buildModernButton(
+                          text: isPhoneVerifying ? 'Sending...' : 'Send OTP',
+                          gradient: const LinearGradient(
+                            colors: [Colors.cyanAccent, Colors.blueAccent],
+                          ),
+                          onPressed: isPhoneVerifying
+                              ? null
+                              : () async {
+                                  final phone = _normalizePhoneNumber(phoneController.text.trim());
+                                  final phoneError = _validatePhone(phone);
+                                  if (phoneError != null) {
+                                    toastification.show(
+                                      context: dialogContext,
+                                      type: ToastificationType.error,
+                                      title: const Text('Validation Error'),
+                                      description: Text(phoneError),
+                                      autoCloseDuration: const Duration(seconds: 2),
+                                    );
+                                    return;
+                                  }
+                                  final isPhoneUnique = await _checkFieldUniqueness('phone', phone, excludeUid: uid);
+                                  if (!isPhoneUnique) {
+                                    toastification.show(
+                                      context: dialogContext,
+                                      type: ToastificationType.error,
+                                      title: const Text('Validation Error'),
+                                      description: const Text('Phone number already in use by another account'),
+                                      autoCloseDuration: const Duration(seconds: 2),
+                                    );
+                                    return;
+                                  }
+                                  setDialogState(() => isPhoneVerifying = true);
+                                  await firebase_auth.FirebaseAuth.instance.verifyPhoneNumber(
+                                    phoneNumber: phone,
+                                    timeout: const Duration(seconds: 60),
+                                    verificationCompleted: (credential) async {
                                       final user = firebase_auth.FirebaseAuth.instance.currentUser;
-                                      if (user != null) {
-                                        bool isVerified = await _checkEmailVerification(user);
-                                        if (isVerified && mounted) {
+                                      if (user != null && mounted && !isDialogClosing) {
+                                        try {
+                                          await user.linkWithCredential(credential);
                                           setDialogState(() {
                                             _signupStep++;
-                                            debugPrint('Advanced to step $_signupStep');
+                                            debugPrint('Phone linked, advanced to step $_signupStep');
                                           });
+                                        } catch (e, stackTrace) {
+                                          debugPrint('Auto phone link error: $e\nStack: $stackTrace');
+                                          toastification.show(
+                                            context: dialogContext,
+                                            type: ToastificationType.error,
+                                            title: const Text('Phone Link Error'),
+                                            description: Text('Error: $e'),
+                                            autoCloseDuration: const Duration(seconds: 2),
+                                          );
                                         }
                                       }
                                     },
-                            ),
-                          ],
-                        ),
-                      ] else if (_signupStep == 2) ...[
-                        Text(
-                          'Step 3: Select Gender',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Column(
-                          children: _genders.map((gender) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8.0),
-                              child: ListTile(
-                                title: Text(
-                                  gender,
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                leading: Radio<String>(
-                                  value: gender,
-                                  groupValue: _selectedGender,
-                                  onChanged: (String? value) {
-                                    setDialogState(() {
-                                      _selectedGender = value;
-                                    });
-                                  },
-                                  fillColor: MaterialStateProperty.resolveWith<Color>(
-                                    (Set<MaterialState> states) {
-                                      if (states.contains(MaterialState.selected)) {
-                                        return Colors.cyanAccent;
-                                      }
-                                      return Colors.white;
+                                    verificationFailed: (e) {
+                                      setDialogState(() => isPhoneVerifying = false);
+                                      toastification.show(
+                                        context: dialogContext,
+                                        type: ToastificationType.error,
+                                        title: const Text('Phone Verification Failed'),
+                                        description: Text('Error: ${e.message}'),
+                                        autoCloseDuration: const Duration(seconds: 2),
+                                      );
+                                      debugPrint('Phone verification failed: ${e.message}');
                                     },
-                                  ),
-                                ),
-                                tileColor: Colors.white.withOpacity(0.1),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            );
-                          }).toList(),
+                                    codeSent: (verId, _) {
+                                      setDialogState(() {
+                                        verificationId = verId;
+                                        isPhoneVerifying = false;
+                                      });
+                                      debugPrint('Code sent to $phone, verificationId: $verId');
+                                    },
+                                    codeAutoRetrievalTimeout: (_) {},
+                                  );
+                                },
                         ),
-                      ] else if (_signupStep == 3) ...[
-                        Text(
-                          'Step 4: Select Profile Image',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                          ),
+                      ] else ...[
+                        _buildModernTextField(
+                          controller: otpController,
+                          label: 'Enter OTP',
+                          icon: Icons.lock,
+                          keyboardType: TextInputType.number,
                         ),
                         const SizedBox(height: 20),
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 20,
-                            mainAxisSpacing: 20,
+                        _buildModernButton(
+                          text: isPhoneVerifying ? 'Verifying...' : 'Verify OTP',
+                          gradient: const LinearGradient(
+                            colors: [Colors.cyanAccent, Colors.blueAccent],
                           ),
-                          itemCount: _profileImages.length,
-                          itemBuilder: (context, index) {
-                            return GestureDetector(
-                              onTap: () {
-                                setDialogState(() {
-                                  _selectedProfileImageIndex = index;
-                                });
-                              },
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: _selectedProfileImageIndex == index
-                                        ? Colors.cyanAccent
-                                        : Colors.transparent,
-                                    width: 3,
-                                  ),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.asset(
-                                    _profileImages[index],
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          if (_signupStep > 0)
-                            _buildModernButton(
-                              text: 'Back',
-                              gradient: const LinearGradient(
-                                colors: [Colors.grey, Colors.grey],
-                              ),
-                              onPressed: () {
-                                setDialogState(() {
-                                  if (_signupStep == 1) {
-                                    setState(() => _isVerificationInProgress = false);
-                                  }
-                                  _signupStep--;
-                                  debugPrint('Back to step $_signupStep');
-                                });
-                              },
-                            ),
-                          _buildModernButton(
-                            text: _signupStep < 3 ? 'Next' : 'Complete',
-                            gradient: const LinearGradient(
-                              colors: [Colors.cyanAccent, Colors.blueAccent],
-                            ),
-                            onPressed: () async {
-                              if (_signupStep < 3) {
-                                if (_signupStep == 0) {
-                                  if (emailController.text.isEmpty ||
-                                      passwordController.text.isEmpty ||
-                                      confirmPasswordController.text.isEmpty ||
-                                      firstNameController.text.isEmpty ||
-                                      lastNameController.text.isEmpty) {
+                          onPressed: isPhoneVerifying
+                              ? null
+                              : () async {
+                                  if (otpController.text.length != 6 || verificationId == null) {
                                     toastification.show(
                                       context: dialogContext,
                                       type: ToastificationType.error,
                                       title: const Text('Validation Error'),
-                                      description: const Text('Please fill all fields'),
+                                      description: const Text('Enter a valid 6-digit OTP'),
                                       autoCloseDuration: const Duration(seconds: 2),
                                     );
                                     return;
                                   }
-                                  if (passwordController.text != confirmPasswordController.text) {
-                                    toastification.show(
-                                      context: dialogContext,
-                                      type: ToastificationType.error,
-                                      title: const Text('Validation Error'),
-                                      description: const Text('Passwords do not match'),
-                                      autoCloseDuration: const Duration(seconds: 2),
-                                    );
-                                    return;
-                                  }
-                                  final emailError = _validateEmail(emailController.text.trim());
-                                  if (emailError != null) {
-                                    toastification.show(
-                                      context: dialogContext,
-                                      type: ToastificationType.error,
-                                      title: const Text('Validation Error'),
-                                      description: Text(emailError),
-                                      autoCloseDuration: const Duration(seconds: 2),
-                                    );
-                                    return;
-                                  }
-                                  final passwordError = _validatePassword(passwordController.text);
-                                  if (passwordError != null) {
-                                    toastification.show(
-                                      context: dialogContext,
-                                      type: ToastificationType.error,
-                                      title: const Text('Validation Error'),
-                                      description: Text(passwordError),
-                                      autoCloseDuration: const Duration(seconds: 2),
-                                    );
-                                    return;
-                                  }
-                                  final isEmailUnique =
-                                      await _checkFieldUniqueness('email', emailController.text.trim());
-                                  if (!isEmailUnique) {
-                                    toastification.show(
-                                      context: dialogContext,
-                                      type: ToastificationType.error,
-                                      title: const Text('Validation Error'),
-                                      description: const Text('Email already in use'),
-                                      autoCloseDuration: const Duration(seconds: 2),
-                                    );
-                                    return;
-                                  }
+                                  setDialogState(() => isPhoneVerifying = true);
+                                  final credential = firebase_auth.PhoneAuthProvider.credential(
+                                    verificationId: verificationId!,
+                                    smsCode: otpController.text.trim(),
+                                  );
                                   try {
                                     final user = firebase_auth.FirebaseAuth.instance.currentUser;
-                                    if (user != null) {
-                                      final credential = firebase_auth.EmailAuthProvider.credential(
-                                        email: emailController.text.trim(),
-                                        password: passwordController.text,
-                                      );
+                                    if (user != null && !isDialogClosing) {
                                       await user.linkWithCredential(credential);
-                                      await _sendVerificationEmail(user);
                                       setDialogState(() {
                                         _signupStep++;
-                                        debugPrint('Advanced to step $_signupStep');
+                                        debugPrint('Phone linked, advanced to step $_signupStep');
                                       });
                                     }
                                   } catch (e, stackTrace) {
-                                    debugPrint('Error linking email: $e\nStack: $stackTrace');
+                                    debugPrint('OTP verification error: $e\nStack: $stackTrace');
                                     toastification.show(
                                       context: dialogContext,
                                       type: ToastificationType.error,
-                                      title: const Text('Error'),
-                                      description: Text('Failed to link email: $e'),
+                                      title: const Text('OTP Verification Failed'),
+                                      description: Text('Error: $e'),
                                       autoCloseDuration: const Duration(seconds: 2),
                                     );
-                                    return;
+                                  } finally {
+                                    setDialogState(() => isPhoneVerifying = false);
                                   }
-                                } else if (_signupStep == 2 && _selectedGender == null) {
+                                },
+                        ),
+                      ],
+                    ] else if (_signupStep == 2) ...[
+                      Text(
+                        'Step 3: Select Gender',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Column(
+                        children: _genders.map((gender) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: ListTile(
+                              title: Text(
+                                gender,
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                ),
+                              ),
+                              leading: Radio<String>(
+                                value: gender,
+                                groupValue: _selectedGender,
+                                onChanged: (String? value) {
+                                  setDialogState(() {
+                                    _selectedGender = value;
+                                  });
+                                },
+                                fillColor: MaterialStateProperty.resolveWith<Color>(
+                                  (Set<MaterialState> states) {
+                                    if (states.contains(MaterialState.selected)) {
+                                      return Colors.cyanAccent;
+                                    }
+                                    return Colors.white;
+                                  },
+                                ),
+                              ),
+                              tileColor: Colors.white.withOpacity(0.1),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ] else if (_signupStep == 3) ...[
+                      Text(
+                        'Step 4: Select Profile Image',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 20,
+                        ),
+                        itemCount: _profileImages.length,
+                        itemBuilder: (context, index) {
+                          return GestureDetector(
+                            onTap: () {
+                              setDialogState(() {
+                                _selectedProfileImageIndex = index;
+                              });
+                            },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: _selectedProfileImageIndex == index
+                                      ? Colors.cyanAccent
+                                      : Colors.transparent,
+                                  width: 3,
+                                ),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.asset(
+                                  _profileImages[index],
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        if (_signupStep > 0)
+                          _buildModernButton(
+                            text: 'Back',
+                            gradient: const LinearGradient(
+                              colors: [Colors.grey, Colors.grey],
+                            ),
+                            onPressed: () {
+                              setDialogState(() {
+                                if (_signupStep == 1) {
+                                  verificationId = null;
+                                  otpController.clear();
+                                }
+                                _signupStep--;
+                                debugPrint('Back to step $_signupStep');
+                              });
+                            },
+                          ),
+                        _buildModernButton(
+                          text: _signupStep < 3 ? 'Next' : 'Complete',
+                          gradient: const LinearGradient(
+                            colors: [Colors.cyanAccent, Colors.blueAccent],
+                          ),
+                          onPressed: () async {
+                            if (isDialogClosing) return; // Prevent actions after dismissal
+                            if (_signupStep < 3) {
+                              if (_signupStep == 0) {
+                                if (firstNameController.text.isEmpty || lastNameController.text.isEmpty) {
                                   toastification.show(
                                     context: dialogContext,
                                     type: ToastificationType.error,
                                     title: const Text('Validation Error'),
-                                    description: const Text('Please select your gender'),
+                                    description: const Text('Please fill all required fields'),
                                     autoCloseDuration: const Duration(seconds: 2),
                                   );
                                   return;
+                                }
+                                if (phoneController.text.trim().isEmpty) {
+                                  setDialogState(() {
+                                    _signupStep = 2;
+                                    debugPrint('No phone provided, skipping to step $_signupStep');
+                                  });
                                 } else {
                                   setDialogState(() {
                                     _signupStep++;
                                     debugPrint('Advanced to step $_signupStep');
                                   });
                                 }
+                              } else if (_signupStep == 2 && _selectedGender == null) {
+                                toastification.show(
+                                  context: dialogContext,
+                                  type: ToastificationType.error,
+                                  title: const Text('Validation Error'),
+                                  description: const Text('Please select your gender'),
+                                  autoCloseDuration: const Duration(seconds: 2),
+                                );
+                                return;
                               } else {
-                                if (_selectedProfileImageIndex == null) {
-                                  toastification.show(
-                                    context: dialogContext,
-                                    type: ToastificationType.error,
-                                    title: const Text('Validation Error'),
-                                    description: const Text('Please select a profile image'),
-                                    autoCloseDuration: const Duration(seconds: 2),
-                                  );
-                                  return;
-                                }
-                                setDialogState(() {});
-                                try {
-                                  final location = await _fetchUserLocation();
-                                  await FirebaseFirestore.instance.collection('users').doc(uid).set({
-                                    'email': emailController.text.trim(),
-                                    'firstName': firstNameController.text.trim(),
-                                    'lastName': lastNameController.text.trim(),
-                                    'phone': _normalizePhoneNumber(_phoneController.text.trim()),
-                                    'role': role,
-                                    'gender': _selectedGender,
-                                    'profileImage': _profileImages[_selectedProfileImageIndex!],
-                                    'location': location,
-                                    'createdAt': FieldValue.serverTimestamp(),
-                                  });
-                                  debugPrint('User details saved for UID: $uid with role: $role');
-                                  Navigator.pop(dialogContext);
-                                  if (mounted) {
-                                    _authBloc?.add(
-                                      AuthRefreshProfileEvent(uid),
-                                    );
-                                    _navigateBasedOnRole(uid);
-                                  }
-                                } catch (e, stackTrace) {
-                                  debugPrint('Error saving profile: $e\n$stackTrace');
-                                  toastification.show(
-                                    context: dialogContext,
-                                    type: ToastificationType.error,
-                                    title: const Text('Error'),
-                                    description: Text('Failed to save profile: $e'),
-                                    autoCloseDuration: const Duration(seconds: 2),
-                                  );
-                                } finally {
-                                  setDialogState(() {});
-                                }
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      );
-    } catch (e, stackTrace) {
-      debugPrint('collectPhoneSignupDetails error: $e\nStack: $stackTrace');
-    } finally {
-      emailController.dispose();
-      passwordController.dispose();
-      confirmPasswordController.dispose();
-      firstNameController.dispose();
-      lastNameController.dispose();
-      if (mounted) {
-        setState(() {
-          _isDialogOpen = false;
-          _isSignupFromState = false;
-          _signupStep = 0;
-        });
-      }
-      debugPrint('Dialog closed for UID: $uid');
-    }
-  }
-
-  Future<void> _collectEmailSignupDetails(
-    BuildContext context,
-    String uid,
-  ) async {
-    if (!mounted || _isDialogOpen) {
-      debugPrint('Dialog already open or widget not mounted, skipping email dialog for UID: $uid');
-      return;
-    }
-    setState(() {
-      _isDialogOpen = true;
-      _signupStep = 0;
-    });
-    debugPrint('Showing email signup dialog for UID: $uid with role: $_selectedRole');
-
-    final firstNameController = TextEditingController();
-    final lastNameController = TextEditingController();
-    final phoneController = TextEditingController();
-    final otpController = TextEditingController();
-    String? verificationId;
-    bool isPhoneVerifying = false;
-
-    try {
-      await showDialog(
-        context: context,
-        barrierDismissible: true,
-        builder: (dialogContext) => StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            if (!mounted) return const SizedBox.shrink();
-
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1B263B),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                padding: const EdgeInsets.all(20),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildStepIndicator(0, "Basic Info"),
-                          _buildStepConnector(),
-                          _buildStepIndicator(1, "Phone Verify"),
-                          _buildStepConnector(),
-                          _buildStepIndicator(2, "Gender"),
-                          _buildStepConnector(),
-                          _buildStepIndicator(3, "Profile"),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-
-                      if (_signupStep == 0) ...[
-                        Text(
-                          'Step 1: Basic Information',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        _buildModernTextField(
-                          controller: firstNameController,
-                          label: 'First Name',
-                          icon: Icons.person,
-                        ),
-                        const SizedBox(height: 16),
-                        _buildModernTextField(
-                          controller: lastNameController,
-                          label: 'Last Name',
-                          icon: Icons.person,
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 16,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.1),
-                                borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(12),
-                                  bottomLeft: Radius.circular(12),
-                                ),
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.2),
-                                ),
-                              ),
-                              child: Text(
-                                '+91',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 1),
-                            Expanded(
-                              child: _buildModernTextField(
-                                controller: phoneController,
-                                label: 'Phone Number (Optional)',
-                                icon: Icons.phone,
-                                keyboardType: TextInputType.phone,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ] else if (_signupStep == 1) ...[
-                        Text(
-                          'Step 2: Verify Phone',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        if (verificationId == null) ...[
-                          Text(
-                            'A verification code will be sent to ${_normalizePhoneNumber(phoneController.text.trim())}.',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white70,
-                              fontSize: 16,
-                              letterSpacing: 1,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 20),
-                          _buildModernButton(
-                            text: isPhoneVerifying ? 'Sending...' : 'Send OTP',
-                            gradient: const LinearGradient(
-                              colors: [Colors.cyanAccent, Colors.blueAccent],
-                            ),
-                            onPressed: isPhoneVerifying
-                                ? null
-                                : () async {
-                                    final phone = _normalizePhoneNumber(phoneController.text.trim());
-                                    final phoneError = _validatePhone(phone);
-                                    if (phoneError != null) {
-                                      toastification.show(
-                                        context: dialogContext,
-                                        type: ToastificationType.error,
-                                        title: const Text('Validation Error'),
-                                        description: Text(phoneError),
-                                        autoCloseDuration: const Duration(seconds: 2),
-                                      );
-                                      return;
-                                    }
-                                    final isPhoneUnique = await _checkFieldUniqueness('phone', phone, excludeUid: uid);
-                                    if (!isPhoneUnique) {
-                                      toastification.show(
-                                        context: dialogContext,
-                                        type: ToastificationType.error,
-                                        title: const Text('Validation Error'),
-                                        description: const Text('Phone number already in use by another account'),
-                                        autoCloseDuration: const Duration(seconds: 2),
-                                      );
-                                      return;
-                                    }
-                                    setDialogState(() => isPhoneVerifying = true);
-                                    await firebase_auth.FirebaseAuth.instance.verifyPhoneNumber(
-                                      phoneNumber: phone,
-                                      timeout: const Duration(seconds: 60),
-                                      verificationCompleted: (credential) async {
-                                        final user = firebase_auth.FirebaseAuth.instance.currentUser;
-                                        if (user != null && mounted) {
-                                          try {
-                                            await user.linkWithCredential(credential);
-                                            setDialogState(() {
-                                              _signupStep++;
-                                              debugPrint('Phone linked, advanced to step $_signupStep');
-                                            });
-                                          } catch (e, stackTrace) {
-                                            debugPrint('Auto phone link error: $e\nStack: $stackTrace');
-                                            toastification.show(
-                                              context: dialogContext,
-                                              type: ToastificationType.error,
-                                              title: const Text('Phone Link Error'),
-                                              description: Text('Error: $e'),
-                                              autoCloseDuration: const Duration(seconds: 2),
-                                            );
-                                          }
-                                        }
-                                      },
-                                      verificationFailed: (e) {
-                                        setDialogState(() => isPhoneVerifying = false);
-                                        toastification.show(
-                                          context: dialogContext,
-                                          type: ToastificationType.error,
-                                          title: const Text('Phone Verification Failed'),
-                                          description: Text('Error: ${e.message}'),
-                                          autoCloseDuration: const Duration(seconds: 2),
-                                        );
-                                        debugPrint('Phone verification failed: ${e.message}');
-                                      },
-                                      codeSent: (verId, _) {
-                                        setDialogState(() {
-                                          verificationId = verId;
-                                          isPhoneVerifying = false;
-                                        });
-                                        debugPrint('Code sent to $phone, verificationId: $verId');
-                                      },
-                                      codeAutoRetrievalTimeout: (_) {},
-                                    );
-                                  },
-                          ),
-                        ] else ...[
-                          _buildModernTextField(
-                            controller: otpController,
-                            label: 'Enter OTP',
-                            icon: Icons.lock,
-                            keyboardType: TextInputType.number,
-                          ),
-                          const SizedBox(height: 20),
-                          _buildModernButton(
-                            text: isPhoneVerifying ? 'Verifying...' : 'Verify OTP',
-                            gradient: const LinearGradient(
-                              colors: [Colors.cyanAccent, Colors.blueAccent],
-                            ),
-                            onPressed: isPhoneVerifying
-                                ? null
-                                : () async {
-                                    if (otpController.text.length != 6 || verificationId == null) {
-                                      toastification.show(
-                                        context: dialogContext,
-                                        type: ToastificationType.error,
-                                        title: const Text('Validation Error'),
-                                        description: const Text('Enter a valid 6-digit OTP'),
-                                        autoCloseDuration: const Duration(seconds: 2),
-                                      );
-                                      return;
-                                    }
-                                    setDialogState(() => isPhoneVerifying = true);
-                                    final credential = firebase_auth.PhoneAuthProvider.credential(
-                                      verificationId: verificationId!,
-                                      smsCode: otpController.text.trim(),
-                                    );
-                                    try {
-                                      final user = firebase_auth.FirebaseAuth.instance.currentUser;
-                                      if (user != null) {
-                                        await user.linkWithCredential(credential);
-                                        setDialogState(() {
-                                          _signupStep++;
-                                          debugPrint('Phone linked, advanced to step $_signupStep');
-                                        });
-                                      }
-                                    } catch (e, stackTrace) {
-                                      debugPrint('OTP verification error: $e\nStack: $stackTrace');
-                                      toastification.show(
-                                        context: dialogContext,
-                                        type: ToastificationType.error,
-                                        title: const Text('OTP Verification Failed'),
-                                        description: Text('Error: $e'),
-                                        autoCloseDuration: const Duration(seconds: 2),
-                                      );
-                                    } finally {
-                                      setDialogState(() => isPhoneVerifying = false);
-                                    }
-                                  },
-                          ),
-                        ],
-                      ] else if (_signupStep == 2) ...[
-                        Text(
-                          'Step 3: Select Gender',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Column(
-                          children: _genders.map((gender) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8.0),
-                              child: ListTile(
-                                title: Text(
-                                  gender,
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                leading: Radio<String>(
-                                  value: gender,
-                                  groupValue: _selectedGender,
-                                  onChanged: (String? value) {
-                                    setDialogState(() {
-                                      _selectedGender = value;
-                                    });
-                                  },
-                                  fillColor: MaterialStateProperty.resolveWith<Color>(
-                                    (Set<MaterialState> states) {
-                                      if (states.contains(MaterialState.selected)) {
-                                        return Colors.cyanAccent;
-                                      }
-                                      return Colors.white;
-                                    },
-                                  ),
-                                ),
-                                tileColor: Colors.white.withOpacity(0.1),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ] else if (_signupStep == 3) ...[
-                        Text(
-                          'Step 4: Select Profile Image',
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 20,
-                            mainAxisSpacing: 20,
-                          ),
-                          itemCount: _profileImages.length,
-                          itemBuilder: (context, index) {
-                            return GestureDetector(
-                              onTap: () {
                                 setDialogState(() {
-                                  _selectedProfileImageIndex = index;
+                                  _signupStep++;
+                                  debugPrint('Advanced to step $_signupStep');
                                 });
-                              },
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: _selectedProfileImageIndex == index
-                                        ? Colors.cyanAccent
-                                        : Colors.transparent,
-                                    width: 3,
-                                  ),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.asset(
-                                    _profileImages[index],
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            );
+                              }
+                            } else {
+                              if (_selectedProfileImageIndex == null) {
+                                toastification.show(
+                                  context: dialogContext,
+                                  type: ToastificationType.error,
+                                  title: const Text('Validation Error'),
+                                  description: const Text('Please select a profile image'),
+                                  autoCloseDuration: const Duration(seconds: 2),
+                                );
+                                return;
+                              }
+                              try {
+                                isDialogClosing = true; // Set flag before dismissal
+                                final location = await _fetchUserLocation();
+                                await FirebaseFirestore.instance.collection('users').doc(uid).set({
+                                  'email': _emailController.text.trim(),
+                                  'firstName': firstNameController.text.trim(),
+                                  'lastName': lastNameController.text.trim(),
+                                  'phone': phoneController.text.isEmpty
+                                      ? ''
+                                      : _normalizePhoneNumber(phoneController.text.trim()),
+                                  'role': _selectedRole!,
+                                  'gender': _selectedGender,
+                                  'profileImage': _profileImages[_selectedProfileImageIndex!],
+                                  'location': location,
+                                  'createdAt': FieldValue.serverTimestamp(),
+                                });
+                                debugPrint('User details saved for UID: $uid with role: $_selectedRole');
+                                Navigator.pop(dialogContext);
+                                if (mounted) {
+                                  _authBloc!.add(
+                                    AuthRefreshProfileEvent(uid),
+                                  );
+                                  _navigateBasedOnRole(uid);
+                                }
+                              } catch (e, stackTrace) {
+                                debugPrint('Error saving profile: $e\n$stackTrace');
+                                isDialogClosing = false; // Reset flag on error
+                                toastification.show(
+                                  context: dialogContext,
+                                  type: ToastificationType.error,
+                                  title: const Text('Error'),
+                                  description: Text('Failed to save profile: $e'),
+                                  autoCloseDuration: const Duration(seconds: 2),
+                                );
+                              }
+                            }
                           },
                         ),
                       ],
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          if (_signupStep > 0)
-                            _buildModernButton(
-                              text: 'Back',
-                              gradient: const LinearGradient(
-                                colors: [Colors.grey, Colors.grey],
-                              ),
-                              onPressed: () {
-                                setDialogState(() {
-                                  if (_signupStep == 1) {
-                                    verificationId = null;
-                                    otpController.clear();
-                                  }
-                                  _signupStep--;
-                                  debugPrint('Back to step $_signupStep');
-                                });
-                              },
-                            ),
-                          _buildModernButton(
-                            text: _signupStep < 3 ? 'Next' : 'Complete',
-                            gradient: const LinearGradient(
-                              colors: [Colors.cyanAccent, Colors.blueAccent],
-                            ),
-                            onPressed: () async {
-                              if (_signupStep < 3) {
-                                if (_signupStep == 0) {
-                                  if (firstNameController.text.isEmpty || lastNameController.text.isEmpty) {
-                                    toastification.show(
-                                      context: dialogContext,
-                                      type: ToastificationType.error,
-                                      title: const Text('Validation Error'),
-                                      description: const Text('Please fill all required fields'),
-                                      autoCloseDuration: const Duration(seconds: 2),
-                                    );
-                                    return;
-                                  }
-                                  if (phoneController.text.trim().isEmpty) {
-                                    setDialogState(() {
-                                      _signupStep = 2; // Skip phone verification if no phone provided
-                                      debugPrint('No phone provided, skipping to step $_signupStep');
-                                    });
-                                  } else {
-                                    setDialogState(() {
-                                      _signupStep++;
-                                      debugPrint('Advanced to step $_signupStep');
-                                    });
-                                  }
-                                } else if (_signupStep == 2 && _selectedGender == null) {
-                                  toastification.show(
-                                    context: dialogContext,
-                                    type: ToastificationType.error,
-                                    title: const Text('Validation Error'),
-                                    description: const Text('Please select your gender'),
-                                    autoCloseDuration: const Duration(seconds: 2),
-                                  );
-                                  return;
-                                } else {
-                                  setDialogState(() {
-                                    _signupStep++;
-                                    debugPrint('Advanced to step $_signupStep');
-                                  });
-                                }
-                              } else {
-                                if (_selectedProfileImageIndex == null) {
-                                  toastification.show(
-                                    context: dialogContext,
-                                    type: ToastificationType.error,
-                                    title: const Text('Validation Error'),
-                                    description: const Text('Please select a profile image'),
-                                    autoCloseDuration: const Duration(seconds: 2),
-                                  );
-                                  return;
-                                }
-                                setDialogState(() {});
-                                try {
-                                  final location = await _fetchUserLocation();
-                                  await FirebaseFirestore.instance.collection('users').doc(uid).set({
-                                    'email': _emailController.text.trim(), // Use email from signup
-                                    'firstName': firstNameController.text.trim(),
-                                    'lastName': lastNameController.text.trim(),
-                                    'phone': phoneController.text.isEmpty
-                                        ? ''
-                                        : _normalizePhoneNumber(phoneController.text.trim()),
-                                    'role': _selectedRole!,
-                                    'gender': _selectedGender,
-                                    'profileImage': _profileImages[_selectedProfileImageIndex!],
-                                    'location': location,
-                                    'createdAt': FieldValue.serverTimestamp(),
-                                  });
-                                  debugPrint('User details saved for UID: $uid with role: $_selectedRole');
-                                  Navigator.pop(dialogContext);
-                                  if (mounted) {
-                                    _authBloc?.add(
-                                      AuthRefreshProfileEvent(uid),
-                                    );
-                                    _navigateBasedOnRole(uid);
-                                  }
-                                } catch (e, stackTrace) {
-                                  debugPrint('Error saving profile: $e\n$stackTrace');
-                                  toastification.show(
-                                    context: dialogContext,
-                                    type: ToastificationType.error,
-                                    title: const Text('Error'),
-                                    description: Text('Failed to save profile: $e'),
-                                    autoCloseDuration: const Duration(seconds: 2),
-                                  );
-                                } finally {
-                                  setDialogState(() {});
-                                }
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        },
+      ),
+    );
+  } catch (e, stackTrace) {
+    debugPrint('collectEmailSignupDetails error: $e\nStack: $stackTrace');
+    if (mounted) {
+      toastification.show(
+        context: context,
+        type: ToastificationType.error,
+        title: const Text('Error'),
+        description: Text('Failed to collect email signup details: $e'),
+        autoCloseDuration: const Duration(seconds: 2),
       );
-    } catch (e, stackTrace) {
-      debugPrint('collectEmailSignupDetails error: $e\nStack: $stackTrace');
-    } finally {
-      firstNameController.dispose();
-      lastNameController.dispose();
-      phoneController.dispose();
-      otpController.dispose();
-      if (mounted) {
-        setState(() {
-          _isDialogOpen = false;
-          _isSignupFromState = false;
-          _signupStep = 0;
-        });
-      }
-      debugPrint('Email dialog closed for UID: $uid');
     }
+  } finally {
+    // Dispose controllers
+    firstNameController.dispose();
+    lastNameController.dispose();
+    phoneController.dispose();
+    otpController.dispose();
+    if (mounted) {
+      setState(() {
+        _isDialogOpen = false;
+        _isSignupFromState = false;
+        _signupStep = 0;
+        _selectedGender = null;
+        _selectedProfileImageIndex = null;
+      });
+    }
+    debugPrint('Email dialog closed for UID: $uid');
   }
+}
 
   Widget _buildRoleSelection() {
     return AnimationConfiguration.staggeredList(
@@ -1885,53 +1911,31 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   }
 
   Widget _buildModernTextField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    bool obscureText = false,
-    Widget? suffixIcon,
-    TextInputType keyboardType = TextInputType.text,
-  }) {
-    return AnimationConfiguration.staggeredList(
-      position: 2,
-      duration: const Duration(milliseconds: 500),
-      child: SlideAnimation(
-        verticalOffset: 50.0,
-        child: FadeInAnimation(
-          child: TextField(
-            controller: controller,
-            obscureText: obscureText,
-            keyboardType: keyboardType,
-            style: GoogleFonts.poppins(color: Colors.white),
-            decoration: InputDecoration(
-              labelText: label,
-              labelStyle: GoogleFonts.poppins(color: Colors.white70),
-              prefixIcon: Icon(icon, color: Colors.white70),
-              suffixIcon: suffixIcon,
-              filled: true,
-              fillColor: Colors.white.withOpacity(0.1),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.white.withOpacity(0.2)),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(
-                  color: Colors.cyanAccent,
-                  width: 2,
-                ),
-              ),
-            ),
+  required TextEditingController controller,
+  required String label,
+  required IconData icon,
+  bool obscureText = false,
+  Widget? suffixIcon,
+  TextInputType keyboardType = TextInputType.text,
+  bool isPhone = false, // Added isPhone parameter
+}) {
+  return AnimationConfiguration.staggeredList(
+    position: 2,
+    duration: const Duration(milliseconds: 500),
+    child: SlideAnimation(
+      verticalOffset: 50.0,
+      child: FadeInAnimation(
+        child: TextField(
+          controller: controller,
+          obscureText: obscureText,
+          keyboardType: keyboardType,
+          style: GoogleFonts.poppins(color: Colors.white),
+          decoration: _modernInputDecoration(label, isPhone: isPhone), // Pass isPhone to _modernInputDecoration
           ),
         ),
       ),
     );
-  }
-
+}
   Widget _buildModernButton({
     required String text,
     required LinearGradient gradient,
@@ -2336,7 +2340,7 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                         ),
                       ],
                     ] else if (_usePhone) ...[
-                      if (!_showOtpField) ...[
+                                          if (!_showOtpField) ...[
                         AnimationConfiguration.staggeredList(
                           position: 2,
                           duration: const Duration(milliseconds: 500),
@@ -2371,11 +2375,12 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                                   ),
                                   const SizedBox(width: 1),
                                   Expanded(
-                                    child: TextField(
-                                                                           controller: _phoneController,
+                                    child: _buildModernTextField(
+                                      controller: _phoneController,
+                                      label: 'Phone Number',
+                                      icon: Icons.phone,
                                       keyboardType: TextInputType.phone,
-                                      style: GoogleFonts.poppins(color: Colors.white),
-                                      decoration: _modernInputDecoration('Phone Number', isPhone: true),
+                                      isPhone: true,
                                     ),
                                   ),
                                 ],
@@ -2401,11 +2406,11 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                         ),
                       ],
                     ],
-                    if (_isSignup) ...[
-                      const SizedBox(height: 16),
+                    if (_isSignup && !_showOtpField) ...[
+                      const SizedBox(height: 20),
                       _buildRoleSelection(),
                     ],
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 30),
                     AnimationConfiguration.staggeredList(
                       position: 7,
                       duration: const Duration(milliseconds: 500),
@@ -2441,23 +2446,21 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
                               setState(() {
                                 _isSignup = !_isSignup;
                                 _showOtpField = false;
-                                _otpController.clear();
                                 _emailController.clear();
                                 _phoneController.clear();
                                 _passwordController.clear();
                                 _confirmPasswordController.clear();
+                                _otpController.clear();
                                 _selectedRole = widget.role;
                               });
                               debugPrint('Switched to ${_isSignup ? 'signup' : 'login'} mode');
                             },
                             child: Text(
-                              _isSignup
-                                  ? 'Already have an account? Login'
-                                  : 'Don’t have an account? Sign Up',
+                              _isSignup ? 'Already have an account? Login' : 'Don’t have an account? Sign Up',
                               style: GoogleFonts.poppins(
                                 color: Colors.cyanAccent,
                                 fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                                letterSpacing: 1,
                               ),
                             ),
                           ),

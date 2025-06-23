@@ -1,12 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 
 class Tournament {
   final String id;
   final String name;
   final String venue;
   final String city;
-  final DateTime eventDate;
-  final DateTime? endDate; // Added endDate field
+  final DateTime startDate;
+  final TimeOfDay startTime;
+  final DateTime? endDate;
   final double entryFee;
   final String status;
   final String createdBy;
@@ -26,8 +28,9 @@ class Tournament {
     required this.name,
     required this.venue,
     required this.city,
-    required this.eventDate,
-    this.endDate, // Optional endDate
+    required this.startDate,
+    required this.startTime,
+    this.endDate,
     required this.entryFee,
     required this.status,
     required this.createdBy,
@@ -49,8 +52,12 @@ class Tournament {
       'name': name,
       'venue': venue,
       'city': city,
-      'eventDate': eventDate,
-      'endDate': endDate, // Add endDate to Firestore serialization
+      'startDate': Timestamp.fromDate(startDate), // Store as separate Timestamp
+      'startTime': {
+        'hour': startTime.hour,
+        'minute': startTime.minute,
+      }, // Store as a map for TimeOfDay
+      'endDate': endDate != null ? Timestamp.fromDate(endDate!) : null,
       'entryFee': entryFee,
       'status': status,
       'createdBy': createdBy,
@@ -68,13 +75,16 @@ class Tournament {
   }
 
   factory Tournament.fromFirestore(Map<String, dynamic> data, String id) {
+    final startDate = (data['startDate'] as Timestamp).toDate();
+    final startTimeData = data['startTime'] as Map<String, dynamic>? ?? {'hour': 0, 'minute': 0};
     return Tournament(
       id: id,
       name: data['name'] ?? '',
       venue: data['venue'] ?? '',
       city: data['city'] ?? '',
-      eventDate: (data['eventDate'] as Timestamp).toDate(),
-      endDate: data['endDate'] != null ? (data['endDate'] as Timestamp).toDate() : null, // Deserialize endDate
+      startDate: startDate,
+      startTime: TimeOfDay(hour: startTimeData['hour'] as int, minute: startTimeData['minute'] as int),
+      endDate: data['endDate'] != null ? (data['endDate'] as Timestamp).toDate() : null,
       entryFee: (data['entryFee'] as num).toDouble(),
       status: data['status'] ?? 'open',
       createdBy: data['createdBy'] ?? '',

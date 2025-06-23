@@ -1,7 +1,4 @@
-
-
-
-  import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:game_app/blocs/auth/auth_bloc.dart';
@@ -194,11 +191,9 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         final userData = userDoc.data() ?? await _createDefaultUser(userId);
         final firstName = userData['firstName']?.toString() ?? 'Unknown';
         final lastName = userData['lastName']?.toString() ?? '';
-        final gender = participant['gender'] as String? ?? 'unknown';
         final score = participant['score'] as int? ?? 0;
         leaderboardData[userId] = {
           'displayName': '$firstName $lastName'.trim(),
-          'gender': gender,
           'score': score,
         };
       }
@@ -829,14 +824,14 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30)); // 01:07 PM IST, June 22, 2025
+    final now = DateTime(2025, 6, 22, 15, 10, 0); // 08:40 PM IST, June 22, 2025
     print('Current Time: $now'); // Debug print
     print('End Date: ${widget.tournament.endDate}'); // Debug print
     final isClosed = widget.tournament.endDate != null && widget.tournament.endDate!.isBefore(now);
     final authState = context.read<AuthBloc>().state;
     final userId = authState is AuthAuthenticated ? authState.user.uid : null;
     final isCreator = userId != null && widget.tournament.createdBy == userId;
-    final withdrawDeadline = widget.tournament.eventDate.subtract(
+    final withdrawDeadline = widget.tournament.startDate.subtract(
       const Duration(days: 3),
     );
     final canWithdraw = DateTime.now().isBefore(withdrawDeadline) && !isClosed;
@@ -880,11 +875,10 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                         ),
                         children: [
                           _buildHeaderCard(isCreator),
-                          
-                       
                           Center(
                             child: Column(
                               children: [
+                                const SizedBox(height: 20),
                                 if (!isCreator && !_hasJoined)
                                   _buildModernButton(
                                     text: isClosed
@@ -906,9 +900,7 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                                         ? null
                                         : () => _joinTournament(context),
                                   ),
-                                if (!isCreator &&
-                                    _hasJoined &&
-                                    canWithdraw)
+                                if (!isCreator && _hasJoined)
                                   Padding(
                                     padding: const EdgeInsets.only(top: 16),
                                     child: Column(
@@ -922,17 +914,32 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                                             ],
                                           ),
                                           isLoading: _isLoading,
-                                          onPressed: () =>
-                                              _withdrawFromTournament(context),
+                                          onPressed: canWithdraw
+                                              ? () => _withdrawFromTournament(context)
+                                              : null,
+                                          isDisabled: !canWithdraw,
+                                          disabledTooltip:
+                                              'Withdraw deadline passed on ${DateFormat('MMM dd').format(withdrawDeadline)}',
                                         ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Can withdraw before ${DateFormat('MMM dd').format(withdrawDeadline)}',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 12,
-                                            color: Colors.white54,
+                                        if (!canWithdraw)
+                                          const SizedBox(height: 8),
+                                        if (!canWithdraw)
+                                          Text(
+                                            'Withdraw deadline passed on ${DateFormat('MMM dd').format(withdrawDeadline)}',
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 12,
+                                              color: Colors.white54,
+                                            ),
+
+                                        
                                           ),
-                                        ),
+                                          SizedBox(height: 4),
+                                          Text('Can withdraw until ${DateFormat('MMM dd').format(withdrawDeadline)}',
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 12,
+                                              color: Colors.white54,
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ),
@@ -1033,6 +1040,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
     required LinearGradient gradient,
     required bool isLoading,
     VoidCallback? onPressed,
+    bool isDisabled = false,
+    String? disabledTooltip,
   }) {
     return AnimationConfiguration.staggeredList(
       position: 0,
@@ -1040,47 +1049,51 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
       child: SlideAnimation(
         verticalOffset: 50.0,
         child: FadeInAnimation(
-          child: GestureDetector(
-            onTap: isLoading || onPressed == null ? null : onPressed,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-              decoration: BoxDecoration(
-                gradient: gradient,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 10,
-                    spreadRadius: 2,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: isLoading
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : Text(
-                      text,
-                      style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                        letterSpacing: 0.5,
-                      ),
+          child: Tooltip(
+            message: isDisabled ? disabledTooltip ?? 'Action disabled' : '',
+            child: GestureDetector(
+              onTap: isLoading || onPressed == null || isDisabled ? null : onPressed,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                decoration: BoxDecoration(
+                  gradient: isDisabled
+                      ? LinearGradient(colors: [Colors.grey.shade700, Colors.grey.shade600])
+                      : gradient,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 10,
+                      spreadRadius: 2,
+                      offset: const Offset(0, 4),
                     ),
+                  ],
+                ),
+                child: isLoading
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : Text(
+                        text,
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: isDisabled ? Colors.grey.shade400 : Colors.white,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+              ),
             ),
           ),
         ),
       ),
     );
   }
-
 
   Widget _buildHeaderCard(bool isCreator) {
     return AnimationConfiguration.staggeredList(
@@ -1144,21 +1157,57 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.info_outline, color: Colors.white70, size: 20),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => TournamentInfoPage(
-                                    tournament: widget.tournament,
-                                    creatorName: widget.creatorName,
-                                    participantDetails: _participantDetails,
+                          if (isCreator)
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    gradient: const LinearGradient(
+                                      colors: [
+                                        Colors.cyanAccent,
+                                        Colors.blueAccent,
+                                      ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(10),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.cyanAccent.withOpacity(0.3),
+                                        blurRadius: 5,
+                                        spreadRadius: 1,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Text(
+                                    'Created by You',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.black87,
+                                    ),
                                   ),
                                 ),
-                              );
-                            },
-                          ),
+                               
+                              ],
+                            ),
+                             IconButton(
+                                  icon: const Icon(Icons.info_outline, color: Colors.white70, size: 25),
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => TournamentInfoPage(
+                                          tournament: widget.tournament,
+                                          creatorName: widget.creatorName,
+                                          participantDetails: _participantDetails,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
                         ],
                       ),
                       const SizedBox(height: 6),
@@ -1173,37 +1222,6 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                     ],
                   ),
                 ),
-                if (isCreator)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [
-                          Colors.cyanAccent,
-                          Colors.blueAccent,
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.cyanAccent.withOpacity(0.3),
-                          blurRadius: 5,
-                          spreadRadius: 1,
-                        ),
-                      ],
-                    ),
-                    child: Text(
-                      'Created by You',
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
@@ -1211,8 +1229,6 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
       ),
     );
   }
-
-
 
   Widget _buildMatchesTab(bool isCreator) {
     return ListView(
@@ -1256,7 +1272,7 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                         isCreator: isCreator,
                         isDoubles: _isDoublesTournament(),
                         isUmpire: _isUmpire,
-                        onDeleteMatch: () => _deleteMatch(index),
+                        onDeleteMatch: () => _showDeleteConfirmationDialog(index),
                       ),
                     ),
                   );
@@ -1296,27 +1312,9 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                             ),
                           ),
                           if (isCreator)
-                            PopupMenuButton<String>(
-                              onSelected: (value) async {
-                                if (value == 'delete') {
-                                  await _deleteMatch(index);
-                                }
-                              },
-                              itemBuilder: (context) => [
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text(
-                                    'Delete Match',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.redAccent,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                              icon: const Icon(
-                                Icons.more_vert,
-                                color: Colors.white70,
-                              ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.redAccent),
+                              onPressed: () => _showDeleteConfirmationDialog(index),
                             ),
                         ],
                       ),
@@ -1395,7 +1393,6 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                     final data = entry.value.value;
                     final displayName =
                         data['teamName'] ?? data['displayName'] as String;
-                    final gender = data['gender'] as String?;
                     final score = data['score'] as int;
 
                     return Container(
@@ -1457,34 +1454,13 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                           ),
                           const SizedBox(width: 16),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                RichText(
-                                  text: TextSpan(
-                                    children: [
-                                      TextSpan(
-                                        text: displayName,
-                                        style: GoogleFonts.poppins(
-                                          color: Colors.white,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      if (gender != null && !_isDoublesTournament())
-                                        TextSpan(
-                                          text:
-                                              ' (${StringExtension(gender).capitalize()})',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 12,
-                                            color: Colors.cyanAccent,
-                                            fontStyle: FontStyle.italic,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                            child: Text(
+                              displayName,
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                           Text(
@@ -1500,6 +1476,37 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                     );
                   },
                 ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteConfirmationDialog(int matchIndex) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1B263B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Confirm Deletion',
+          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'Are you sure you want to delete this match? This action cannot be undone.',
+          style: GoogleFonts.poppins(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteMatch(matchIndex);
+            },
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.redAccent)),
+          ),
         ],
       ),
     );
@@ -1583,7 +1590,7 @@ class TournamentInfoPage extends StatelessWidget {
                           _buildDetailRow(
                             icon: Icons.calendar_today,
                             label: 'Date',
-                            value: _formatDateRange(tournament.eventDate, tournament.endDate),
+                            value: _formatDateRange(tournament.startDate, tournament.endDate),
                           ),
                           _buildDetailRow(
                             icon: Icons.account_balance_wallet,

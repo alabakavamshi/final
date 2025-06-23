@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:game_app/models/tournament.dart';
@@ -136,7 +135,6 @@ class _PlayPageState extends State<PlayPage> {
     }
   }
 
-
   void _showErrorToast(String errorMessage) {
     toastification.show(
       context: context,
@@ -176,7 +174,7 @@ class _PlayPageState extends State<PlayPage> {
       for (var doc in userDocs) {
         if (doc.exists) {
           final data = doc.data() as Map<String, dynamic>;
-          creatorNames[doc.id] = data['firstName']+ ' ' + data['lastName'] ?? 'Unknown User';
+          creatorNames[doc.id] = data['firstName'] + ' ' + (data['lastName'] ?? '');
         } else {
           creatorNames[doc.id] = 'Unknown User';
         }
@@ -245,7 +243,7 @@ class _PlayPageState extends State<PlayPage> {
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
-                        children: ['All', 'Men\'s Singles', 'Women\'s Singles','Men\'s Doubles','Women\'s Doubles','Mixed Doubles']
+                        children: ['All', 'Men\'s Singles', 'Women\'s Singles', 'Men\'s Doubles', 'Women\'s Doubles', 'Mixed Doubles']
                             .map((format) => ChoiceChip(
                                   label: Text(
                                     format,
@@ -469,13 +467,11 @@ class _PlayPageState extends State<PlayPage> {
             ),
           ),
         ),
-        
         childCount: 3,
       ),
     );
   }
 
-  // Helper method to capitalize the sort option for display
   String _capitalizeSortOption(String sortBy) {
     return sortBy[0].toUpperCase() + sortBy.substring(1);
   }
@@ -513,7 +509,6 @@ class _PlayPageState extends State<PlayPage> {
                   color: Colors.black,
                 ),
               ),
-              
               actions: [
                 IconButton(
                   icon: const Icon(Icons.filter_list, color: Colors.grey),
@@ -617,7 +612,7 @@ class _PlayPageState extends State<PlayPage> {
                         ),
                       ),
                       Container(
-                        width: 115, // Increased width to accommodate text and icon
+                        width: 115,
                         height: 48,
                         decoration: BoxDecoration(
                           color: Colors.white,
@@ -807,9 +802,7 @@ class _PlayPageState extends State<PlayPage> {
                   final tournaments = snapshot.data!.docs
                       .map((doc) {
                         try {
-                          final t = Tournament.fromFirestore(doc.data() as Map<String, dynamic>, doc.id);
-                          print('Loaded event: ${t.name}, maxParticipants: ${t.maxParticipants}');
-                          return t;
+                          return Tournament.fromFirestore(doc.data() as Map<String, dynamic>, doc.id);
                         } catch (e) {
                           print('Error parsing event: $e');
                           failedCount++;
@@ -856,9 +849,7 @@ class _PlayPageState extends State<PlayPage> {
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
-                                          builder: (context) => const PlayerHomePage(
-                                          
-                                          ),
+                                          builder: (context) => const PlayerHomePage(),
                                         ),
                                       );
                                     },
@@ -911,12 +902,19 @@ class _PlayPageState extends State<PlayPage> {
                     );
                   }
 
-                  final now = DateTime.now();
+                  final now = DateTime(2025, 6, 22, 23, 12); // 11:12 PM IST, June 22, 2025
                   final filteredTournaments = tournaments.where((tournament) {
                     final name = tournament.name.toLowerCase();
                     final venue = tournament.venue.toLowerCase();
                     final city = tournament.city.toLowerCase();
-                    final isFuture = tournament.eventDate.isAfter(now);
+                    final startDateTime = DateTime(
+                      tournament.startDate.year,
+                      tournament.startDate.month,
+                      tournament.startDate.day,
+                      tournament.startTime.hour,
+                      tournament.startTime.minute,
+                    );
+                    final isFuture = startDateTime.isAfter(now);
                     final matchesCity = city == widget.userCity.toLowerCase();
 
                     bool matchesGameFormat = _selectedGameFormat == null ||
@@ -924,11 +922,11 @@ class _PlayPageState extends State<PlayPage> {
 
                     bool matchesDateRange = true;
                     if (_filterStartDate != null) {
-                      matchesDateRange = tournament.eventDate.isAfter(_filterStartDate!);
+                      matchesDateRange = startDateTime.isAfter(_filterStartDate!);
                     }
                     if (_filterEndDate != null) {
                       matchesDateRange = matchesDateRange &&
-                          tournament.eventDate.isBefore(_filterEndDate!.add(const Duration(days: 1)));
+                          startDateTime.isBefore(_filterEndDate!.add(const Duration(days: 1)));
                     }
 
                     print('Filtering event: ${tournament.name}, city: $city, userCity: ${widget.userCity}, matchesCity: $matchesCity');
@@ -942,7 +940,23 @@ class _PlayPageState extends State<PlayPage> {
                   }).toList();
 
                   if (_sortBy == 'date') {
-                    filteredTournaments.sort((a, b) => a.eventDate.compareTo(b.eventDate));
+                    filteredTournaments.sort((a, b) {
+                      final aDateTime = DateTime(
+                        a.startDate.year,
+                        a.startDate.month,
+                        a.startDate.day,
+                        a.startTime.hour,
+                        a.startTime.minute,
+                      );
+                      final bDateTime = DateTime(
+                        b.startDate.year,
+                        b.startDate.month,
+                        b.startDate.day,
+                        b.startTime.hour,
+                        b.startTime.minute,
+                      );
+                      return aDateTime.compareTo(bDateTime);
+                    });
                   } else if (_sortBy == 'name') {
                     filteredTournaments.sort((a, b) => a.name.compareTo(b.name));
                   } else if (_sortBy == 'participants') {
@@ -976,7 +990,6 @@ class _PlayPageState extends State<PlayPage> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                 
                                   const SizedBox(width: 16),
                                   OutlinedButton(
                                     onPressed: () {

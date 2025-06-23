@@ -952,7 +952,7 @@ class _PlayerHomePageState extends State<PlayerHomePage> with SingleTickerProvid
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Badminton Blitz',
+                      'SmashLive',
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w800,
                         fontSize: 24,

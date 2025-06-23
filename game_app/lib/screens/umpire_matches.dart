@@ -257,7 +257,7 @@ class _UmpireMatchesPageState extends State<UmpireMatchesPage> {
                                               children: [
                                                 const SizedBox(height: 8),
                                                 Text(
-                                                  'Status: ${status.capitalize()}',
+                                                  'Status: ${StringExtension(status).capitalize()}',
                                                   style: GoogleFonts.poppins(
                                                     color: Colors.white70,
                                                     fontSize: 14,

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:game_app/models/tournament.dart';
 import 'package:game_app/screens/edit_tournament_page.dart'; // Ensure this import matches your file structure
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 
 class TournamentOverviewPage extends StatelessWidget {
   final Tournament tournament;
@@ -69,11 +70,11 @@ class TournamentOverviewPage extends StatelessWidget {
                   _buildDivider(),
                   _buildDetailRow(
                     'Date',
-                    '${tournament.eventDate.day}/${tournament.eventDate.month}/${tournament.eventDate.year} ${tournament.eventDate.hour}:${tournament.eventDate.minute}',
+                    '${DateFormat('dd/MM/yyyy').format(tournament.startDate)} ${tournament.startTime.format(context)} IST',
                   ),
                   _buildDivider(),
                   _buildDetailRow('End Date', tournament.endDate != null
-                      ? '${tournament.endDate!.day}/${tournament.endDate!.month}/${tournament.endDate!.year}'
+                      ? DateFormat('dd/MM/yyyy').format(tournament.endDate!)
                       : 'Not set'),
                   _buildDivider(),
                   _buildDetailRow('Entry Fee', '\$${tournament.entryFee.toStringAsFixed(2)}'),

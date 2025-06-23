@@ -53,7 +53,7 @@ class SplashScreen extends StatelessWidget {
                   const SizedBox(height: 30),
                   // App title
                   Text(
-                    'Badminton Blitz',
+                    'SmashLive',
                     style: GoogleFonts.poppins(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,

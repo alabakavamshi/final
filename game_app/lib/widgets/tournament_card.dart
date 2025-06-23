@@ -17,6 +17,9 @@ class TournamentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Split eventDate into startDate and startTime for display
+    final startTime = tournament.startTime;
+
     return Container(
       padding: const EdgeInsets.all(16),
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
@@ -119,8 +122,8 @@ class TournamentCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   tournament.endDate != null
-                      ? '${DateFormat('MMM dd, yyyy ').format(tournament.eventDate)} - ${DateFormat('MMM dd, yyyy').format(tournament.endDate!)} • ${DateFormat('hh:mm a').format(tournament.eventDate)} IST'
-                      : DateFormat('MMM dd, yyyy • hh:mm a').format(tournament.eventDate),
+                      ? '${DateFormat('MMM dd, yyyy ').format(tournament.startDate)} - ${DateFormat('MMM dd, yyyy').format(tournament.endDate!)} • ${startTime.format(context)} IST'
+                      : '${DateFormat('MMM dd, yyyy').format(tournament.startDate)} • ${startTime.format(context)} IST',
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     color: Colors.white70,

@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:game_app/models/tournament.dart';
 import 'package:game_app/widgets/tournament_card.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -566,7 +566,14 @@ class _TournamentDiscoveryScreenState extends State<TournamentDiscoveryScreen> {
                     final name = tournament.name.toLowerCase();
                     final venue = tournament.venue.toLowerCase();
                     final city = tournament.city.toLowerCase();
-                    final isFuture = tournament.eventDate.isAfter(DateTime.now());
+                    final startDateTime = DateTime(
+                      tournament.startDate.year,
+                      tournament.startDate.month,
+                      tournament.startDate.day,
+                      tournament.startTime.hour,
+                      tournament.startTime.minute,
+                    );
+                    bool isFuture = startDateTime.isAfter(DateTime.now());
 
                     bool matchesSearch = name.contains(_searchQuery) ||
                         venue.contains(_searchQuery) ||
@@ -580,11 +587,11 @@ class _TournamentDiscoveryScreenState extends State<TournamentDiscoveryScreen> {
 
                     bool matchesDateRange = true;
                     if (_filterStartDate != null) {
-                      matchesDateRange = tournament.eventDate.isAfter(_filterStartDate!);
+                      matchesDateRange = startDateTime.isAfter(_filterStartDate!);
                     }
                     if (_filterEndDate != null) {
                       matchesDateRange = matchesDateRange &&
-                          tournament.eventDate.isBefore(_filterEndDate!.add(const Duration(days: 1)));
+                          startDateTime.isBefore(_filterEndDate!.add(const Duration(days: 1)));
                     }
 
                     return matchesSearch &&
@@ -596,7 +603,23 @@ class _TournamentDiscoveryScreenState extends State<TournamentDiscoveryScreen> {
 
                   // Apply sorting
                   if (_sortBy == 'date') {
-                    filteredTournaments.sort((a, b) => a.eventDate.compareTo(b.eventDate));
+                    filteredTournaments.sort((a, b) {
+                      final aDateTime = DateTime(
+                        a.startDate.year,
+                        a.startDate.month,
+                        a.startDate.day,
+                        a.startTime.hour,
+                        a.startTime.minute,
+                      );
+                      final bDateTime = DateTime(
+                        b.startDate.year,
+                        b.startDate.month,
+                        b.startDate.day,
+                        b.startTime.hour,
+                        b.startTime.minute,
+                      );
+                      return aDateTime.compareTo(bDateTime);
+                    });
                   } else if (_sortBy == 'name') {
                     filteredTournaments.sort((a, b) => a.name.compareTo(b.name));
                   } else if (_sortBy == 'participants') {
@@ -646,7 +669,7 @@ class _TournamentDiscoveryScreenState extends State<TournamentDiscoveryScreen> {
                             child: TournamentCard(
                               tournament: tournament,
                               creatorName: creatorName,
-                              isCreator: false,// Set this appropriately if you have the current user's UID
+                              isCreator: false, // Set this appropriately if you have the current user's UID
                             ),
                           );
                         }).toList(),
