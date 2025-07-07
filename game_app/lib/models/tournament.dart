@@ -75,20 +75,32 @@ class Tournament {
   }
 
   factory Tournament.fromFirestore(Map<String, dynamic> data, String id) {
-    final startDate = (data['startDate'] as Timestamp).toDate();
-    final startTimeData = data['startTime'] as Map<String, dynamic>? ?? {'hour': 0, 'minute': 0};
+    // Handle null startDate by providing a default (current date)
+    final startDate =
+        (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+    // Handle null startTime with default values
+    final startTimeData =
+        data['startTime'] as Map<String, dynamic>? ?? {'hour': 0, 'minute': 0};
+
     return Tournament(
       id: id,
       name: data['name'] ?? '',
       venue: data['venue'] ?? '',
       city: data['city'] ?? '',
       startDate: startDate,
-      startTime: TimeOfDay(hour: startTimeData['hour'] as int, minute: startTimeData['minute'] as int),
-      endDate: data['endDate'] != null ? (data['endDate'] as Timestamp).toDate() : null,
-      entryFee: (data['entryFee'] as num).toDouble(),
+      startTime: TimeOfDay(
+        hour: startTimeData['hour'] as int,
+        minute: startTimeData['minute'] as int,
+      ),
+      endDate:
+          data['endDate'] != null
+              ? (data['endDate'] as Timestamp).toDate()
+              : null,
+      entryFee: (data['entryFee'] as num?)?.toDouble() ?? 0.0,
       status: data['status'] ?? 'open',
       createdBy: data['createdBy'] ?? '',
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       participants: List<Map<String, dynamic>>.from(data['participants'] ?? []),
       rules: data['rules'] ?? '',
       maxParticipants: data['maxParticipants'] ?? 0,

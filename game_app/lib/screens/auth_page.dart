@@ -4,9 +4,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:game_app/blocs/auth/auth_bloc.dart';
 import 'package:game_app/blocs/auth/auth_event.dart';
 import 'package:game_app/blocs/auth/auth_state.dart';
-import 'package:game_app/screens/organiserhomepage.dart';
-import 'package:game_app/screens/playerhomepage.dart';
-import 'package:game_app/screens/umpirehomepage.dart';
+import 'package:game_app/organiser_pages/organiserhomepage.dart';
+import 'package:game_app/player_pages/playerhomepage.dart';
+import 'package:game_app/umpire/umpirehomepage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -127,28 +127,57 @@ class _AuthPageState extends State<AuthPage> with TickerProviderStateMixin {
   }
 
   Future<void> _testFirestoreConnectivity() async {
-    try {
-      await FirebaseFirestore.instance
-          .collection('test')
-          .doc('connectivity')
-          .set({
-        'timestamp': FieldValue.serverTimestamp(),
-        'test': 'connectivity_check',
-      });
-      debugPrint('Firestore connectivity test successful');
-    } catch (e, stackTrace) {
-      debugPrint('Firestore connectivity test failed: $e\nStack: $stackTrace');
-      if (mounted) {
+  try {
+    // First check if user is authenticated
+    final user = firebase_auth.FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      debugPrint('Firestore test skipped - user not authenticated');
+      return;
+    }
+
+    // Test with a document in the users collection
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .set({
+          'testTimestamp': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+    debugPrint('Firestore connectivity test successful');
+  } on FirebaseException catch (e) {
+    debugPrint('Firestore connectivity test failed: ${e.code} - ${e.message}');
+    if (mounted) {
+      if (e.code == 'permission-denied') {
+        toastification.show(
+          context: context,
+          type: ToastificationType.error,
+          title: const Text('Permission Denied'),
+          description: const Text('You don\'t have permission to access this data'),
+          autoCloseDuration: const Duration(seconds: 5),
+        );
+      } else {
         toastification.show(
           context: context,
           type: ToastificationType.error,
           title: const Text('Firestore Connection Failed'),
-          description: Text('Error: $e'),
+          description: Text('Error: ${e.message}'),
           autoCloseDuration: const Duration(seconds: 5),
         );
       }
     }
+  } catch (e, stackTrace) {
+    debugPrint('Firestore connectivity test failed: $e\nStack: $stackTrace');
+    if (mounted) {
+      toastification.show(
+        context: context,
+        type: ToastificationType.error,
+        title: const Text('Connection Error'),
+        description: Text('Failed to connect to Firestore: $e'),
+        autoCloseDuration: const Duration(seconds: 5),
+      );
+    }
   }
+}
 
   void _validatePasswordConstraints() {
     if (!mounted) return;

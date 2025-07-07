@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:game_app/models/tournament.dart';
-import 'package:game_app/screens/playerhomepage.dart';
+import 'package:game_app/player_pages/playerhomepage.dart';
 import 'package:game_app/widgets/tournament_card.dart' as card;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:toastification/toastification.dart';
-import 'package:game_app/screens/tournament_details_page.dart';
+import 'package:game_app/tournaments/tournament_details_page.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:intl/intl.dart';
 import 'package:shimmer/shimmer.dart';

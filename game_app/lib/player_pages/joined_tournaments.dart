@@ -113,13 +113,19 @@ class JoinedTournamentsPage extends StatelessWidget {
             );
           }
 
-          final tournaments = snapshot.data!.docs
-              .map((doc) {
-                print('Tournament data: ${doc.data()}'); // Debug log
-                return Tournament.fromFirestore(doc.data() as Map<String, dynamic>, doc.id);
-              })
-              .where((tournament) => tournament.participants.any((p) => p['id'] == userId))
-              .toList();
+         final tournaments = snapshot.data!.docs
+    .map((doc) {
+      try {
+        final data = doc.data() as Map<String, dynamic>;
+        return Tournament.fromFirestore(data, doc.id);
+      } catch (e) {
+        print('Error parsing tournament ${doc.id}: $e');
+        return null;
+      }
+    })
+    .where((tournament) => tournament != null && tournament.participants.any((p) => p['id'] == userId))
+    .toList()
+    .cast<Tournament>();
 
           if (tournaments.isEmpty) {
             return Center(

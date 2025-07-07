@@ -7,10 +7,10 @@ import 'package:game_app/blocs/auth/auth_event.dart';
 import 'package:game_app/blocs/auth/auth_state.dart';
 import 'package:game_app/firebase_options.dart';
 import 'package:game_app/screens/auth_page.dart';
-import 'package:game_app/screens/organiserhomepage.dart';
-import 'package:game_app/screens/playerhomepage.dart';
+import 'package:game_app/organiser_pages/organiserhomepage.dart';
+import 'package:game_app/player_pages/playerhomepage.dart';
 import 'package:game_app/screens/splash_screen.dart';
-import 'package:game_app/screens/umpirehomepage.dart';
+import 'package:game_app/umpire/umpirehomepage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart'; // Import geolocator
 

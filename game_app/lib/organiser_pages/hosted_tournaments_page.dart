@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:game_app/models/tournament.dart';
-import 'package:game_app/screens/edit_tournament_page.dart';
-import 'package:game_app/screens/tournament_overview_page.dart';
+import 'package:game_app/organiser_pages/edit_tournament_page.dart';
+import 'package:game_app/tournaments/tournament_overview_page.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:toastification/toastification.dart';

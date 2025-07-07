@@ -6,7 +6,7 @@ import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:game_app/blocs/auth/auth_bloc.dart';
 import 'package:game_app/blocs/auth/auth_state.dart';
 import 'package:game_app/screens/countdown_text.dart';
-import 'package:game_app/screens/matchcontrolpage.dart';
+import 'package:game_app/umpire/matchcontrolpage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 

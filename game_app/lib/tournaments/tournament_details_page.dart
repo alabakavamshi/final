@@ -1,6 +1,4 @@
-
 import 'dart:core';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -8,20 +6,11 @@ import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:game_app/blocs/auth/auth_bloc.dart';
 import 'package:game_app/blocs/auth/auth_state.dart';
 import 'package:game_app/models/tournament.dart';
-import 'package:game_app/screens/match_details_page.dart';
+import 'package:game_app/tournaments/match_details_page.dart';
+import 'package:game_app/tournaments/tournament_info_page.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:toastification/toastification.dart';
-
-const String _defaultBadmintonRules = '''
-1. Matches are best of 3 games, each played to 21 points with a 2-point lead required to win.
-2. A rally point system is used; a point is scored on every serve.
-3. Players change sides after each game and at 11 points in the third game.
-4. A 60-second break is allowed between games, and a 120-second break at 11 points in a game.
-5. Service must be diagonal, below the waist, and the shuttle must land within the opponent's court.
-6. Faults include: shuttle landing out of bounds, double hits, or player touching the net.
-7. Respect the umpire's decisions and maintain sportsmanship at all times.
-''';
 
 class TournamentDetailsPage extends StatefulWidget {
   final Tournament tournament;
@@ -48,7 +37,7 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
   late List<Map<String, dynamic>> _matches;
   List<Map<String, dynamic>> _participantDetails = [];
   bool _isUmpire = false;
-  final GlobalKey _matchesListKey = GlobalKey(); // Added key for ListView rebuild
+  final GlobalKey _matchesListKey = GlobalKey();
 
   @override
   void initState() {
@@ -70,7 +59,7 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         .doc(widget.tournament.id)
         .snapshots()
         .listen((snapshot) {
-      if (!mounted) return; // Prevent updates if widget is disposed
+      if (!mounted) return;
       final data = snapshot.data();
       if (data != null) {
         setState(() {
@@ -185,7 +174,7 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                 : List<String>.from(match['team2Ids']);
             final teamPlayerIds = team['players'].map((p) => p['id'] as String).toList();
             if (teamPlayerIds.every((id) => winningTeamIds.contains(id))) {
-              teamScore += 1; // Simplified scoring: +1 per win
+              teamScore += 1;
             }
           }
         }
@@ -340,13 +329,31 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
     });
 
     try {
+      // Create a map of existing matches by their IDs for quick lookup
+      final existingMatches = {
+        for (var match in _matches) 
+          match['matchId'] as String: match
+      };
+
       final newMatches = <Map<String, dynamic>>[];
       final updatedParticipants = _participants.map((p) => {...p, 'score': 0}).toList();
+
+      // Use tournament startDate as base, fallback to current date
+      final baseStartDate = widget.tournament.startDate;
+      // Set matches to start at 9:00 AM on the startDate
+      DateTime matchStartTime = DateTime(
+        baseStartDate.year,
+        baseStartDate.month,
+        baseStartDate.day,
+        9, 
+        0,
+      );
 
       if (_isDoublesTournament()) {
         if (_teams.length < 2) {
           throw 'Need at least 2 teams to schedule matches.';
         }
+        
         switch (widget.tournament.gameType.toLowerCase()) {
           case 'knockout':
             final shuffledTeams = List<Map<String, dynamic>>.from(_teams)..shuffle();
@@ -359,26 +366,43 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
               final team2Names = team2['players']
                   .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
                   .toList();
-              newMatches.add({
-                'round': 1,
-                'team1': team1Names,
-                'team2': team2Names,
-                'team1Ids': team1['players'].map((p) => p['id']).toList(),
-                'team2Ids': team2['players'].map((p) => p['id']).toList(),
-                'completed': false,
-                'winner': null,
-                'umpire': {'name': '', 'email': '', 'phone': ''},
-                'liveScores': {
-                  'team1': [0, 0, 0],
-                  'team2': [0, 0, 0],
-                  'currentGame': 1,
-                  'isLive': false,
-                  'currentServer': 'team1',
-                },
-                'startTime': null,
-              });
+              
+              final team1Ids = team1['players'].map((p) => p['id']).toList();
+              final team2Ids = team2['players'].map((p) => p['id']).toList();
+              
+              // Generate a consistent match ID based on team composition
+              final matchId = 'match_${team1Ids.join('_')}_vs_${team2Ids.join('_')}';
+              
+              // Check if this match already exists
+              if (existingMatches.containsKey(matchId)) {
+                // Preserve the existing match data
+                newMatches.add(existingMatches[matchId]!);
+              } else {
+                // Create new match
+                newMatches.add({
+                  'matchId': matchId,
+                  'round': 1,
+                  'team1': team1Names,
+                  'team2': team2Names,
+                  'team1Ids': team1Ids,
+                  'team2Ids': team2Ids,
+                  'completed': false,
+                  'winner': null,
+                  'umpire': {'name': '', 'email': '', 'phone': ''},
+                  'liveScores': {
+                    'team1': [0, 0, 0],
+                    'team2': [0, 0, 0],
+                    'currentGame': 1,
+                    'isLive': false,
+                    'currentServer': 'team1',
+                  },
+                  'startTime': Timestamp.fromDate(matchStartTime),
+                });
+                matchStartTime = matchStartTime.add(const Duration(hours: 1));
+              }
             }
             break;
+            
           case 'round-robin':
             for (int i = 0; i < _teams.length; i++) {
               for (int j = i + 1; j < _teams.length; j++) {
@@ -390,27 +414,41 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                 final team2Names = team2['players']
                     .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
                     .toList();
-                newMatches.add({
-                  'round': 1,
-                  'team1': team1Names,
-                  'team2': team2Names,
-                  'team1Ids': team1['players'].map((p) => p['id']).toList(),
-                  'team2Ids': team2['players'].map((p) => p['id']).toList(),
-                  'completed': false,
-                  'winner': null,
-                  'umpire': {'name': '', 'email': '', 'phone': ''},
-                  'liveScores': {
-                    'team1': [0, 0, 0],
-                    'team2': [0, 0, 0],
-                    'currentGame': 1,
-                    'isLive': false,
-                    'currentServer': 'team1',
-                  },
-                  'startTime': null,
-                });
+                
+                final team1Ids = team1['players'].map((p) => p['id']).toList();
+                final team2Ids = team2['players'].map((p) => p['id']).toList();
+                
+                // Generate a consistent match ID
+                final matchId = 'match_${team1Ids.join('_')}_vs_${team2Ids.join('_')}';
+                
+                if (existingMatches.containsKey(matchId)) {
+                  newMatches.add(existingMatches[matchId]!);
+                } else {
+                  newMatches.add({
+                    'matchId': matchId,
+                    'round': 1,
+                    'team1': team1Names,
+                    'team2': team2Names,
+                    'team1Ids': team1Ids,
+                    'team2Ids': team2Ids,
+                    'completed': false,
+                    'winner': null,
+                    'umpire': {'name': '', 'email': '', 'phone': ''},
+                    'liveScores': {
+                      'team1': [0, 0, 0],
+                      'team2': [0, 0, 0],
+                      'currentGame': 1,
+                      'isLive': false,
+                      'currentServer': 'team1',
+                    },
+                    'startTime': Timestamp.fromDate(matchStartTime),
+                  });
+                  matchStartTime = matchStartTime.add(const Duration(hours: 1));
+                }
               }
             }
             break;
+            
           default:
             throw 'Unsupported tournament type: ${widget.tournament.gameType}';
         }
@@ -418,38 +456,22 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         if (_participants.length < 2) {
           throw 'Need at least 2 participants to schedule matches.';
         }
+        
         switch (widget.tournament.gameType.toLowerCase()) {
           case 'knockout':
             final shuffledParticipants = List<Map<String, dynamic>>.from(_participants)..shuffle();
             for (int i = 0; i < shuffledParticipants.length - 1; i += 2) {
               final player1 = shuffledParticipants[i];
               final player2 = shuffledParticipants[i + 1];
-              newMatches.add({
-                'round': 1,
-                'player1': await _getDisplayName(player1['id']),
-                'player2': await _getDisplayName(player2['id']),
-                'player1Id': player1['id'],
-                'player2Id': player2['id'],
-                'completed': false,
-                'winner': null,
-                'umpire': {'name': '', 'email': '', 'phone': ''},
-                'liveScores': {
-                  'player1': [0, 0, 0],
-                  'player2': [0, 0, 0],
-                  'currentGame': 1,
-                  'isLive': false,
-                  'currentServer': 'player1',
-                },
-                'startTime': null,
-              });
-            }
-            break;
-          case 'round-robin':
-            for (int i = 0; i < _participants.length; i++) {
-              for (int j = i + 1; j < _participants.length; j++) {
-                final player1 = _participants[i];
-                final player2 = _participants[j];
+              
+              // Generate consistent match ID
+              final matchId = 'match_${player1['id']}_vs_${player2['id']}';
+              
+              if (existingMatches.containsKey(matchId)) {
+                newMatches.add(existingMatches[matchId]!);
+              } else {
                 newMatches.add({
+                  'matchId': matchId,
                   'round': 1,
                   'player1': await _getDisplayName(player1['id']),
                   'player2': await _getDisplayName(player2['id']),
@@ -465,11 +487,49 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                     'isLive': false,
                     'currentServer': 'player1',
                   },
-                  'startTime': null,
+                  'startTime': Timestamp.fromDate(matchStartTime),
                 });
+                matchStartTime = matchStartTime.add(const Duration(hours: 1));
               }
             }
             break;
+            
+          case 'round-robin':
+            for (int i = 0; i < _participants.length; i++) {
+              for (int j = i + 1; j < _participants.length; j++) {
+                final player1 = _participants[i];
+                final player2 = _participants[j];
+                
+                final matchId = 'match_${player1['id']}_vs_${player2['id']}';
+                
+                if (existingMatches.containsKey(matchId)) {
+                  newMatches.add(existingMatches[matchId]!);
+                } else {
+                  newMatches.add({
+                    'matchId': matchId,
+                    'round': 1,
+                    'player1': await _getDisplayName(player1['id']),
+                    'player2': await _getDisplayName(player2['id']),
+                    'player1Id': player1['id'],
+                    'player2Id': player2['id'],
+                    'completed': false,
+                    'winner': null,
+                    'umpire': {'name': '', 'email': '', 'phone': ''},
+                    'liveScores': {
+                      'player1': [0, 0, 0],
+                      'player2': [0, 0, 0],
+                      'currentGame': 1,
+                      'isLive': false,
+                      'currentServer': 'player1',
+                    },
+                    'startTime': Timestamp.fromDate(matchStartTime),
+                  });
+                  matchStartTime = matchStartTime.add(const Duration(hours: 1));
+                }
+              }
+            }
+            break;
+            
           default:
             throw 'Unsupported tournament type: ${widget.tournament.gameType}';
         }
@@ -834,7 +894,7 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
+    final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30)); // IST
     final isClosed = widget.tournament.endDate != null && widget.tournament.endDate!.isBefore(now);
     final authState = context.read<AuthBloc>().state;
     final userId = authState is AuthAuthenticated ? authState.user.uid : null;
@@ -915,7 +975,7 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                                           onPressed: canWithdraw ? () => _withdrawFromTournament(context) : null,
                                           isDisabled: !canWithdraw,
                                           disabledTooltip:
-                                            'Withdraw deadline passed on ${DateFormat('MMM dd').format(withdrawDeadline)}',
+                                              'Withdraw deadline passed on ${DateFormat('MMM dd').format(withdrawDeadline)}',
                                         ),
                                         if (!canWithdraw)
                                           Padding(
@@ -1010,7 +1070,7 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
               if (_hasJoined || isCreator)
                 SliverToBoxAdapter(
                   child: SizedBox(
-                    height: MediaQuery.of(context).size.height * 0.6, // Dynamic height
+                    height: MediaQuery.of(context).size.height * 0.6,
                     child: TabBarView(
                       controller: _tabController,
                       children: [
@@ -1210,7 +1270,7 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
 
   Widget _buildMatchesTab(bool isCreator) {
     return ListView.builder(
-      key: _matchesListKey, // Ensure rebuild on _matches update
+      key: _matchesListKey,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       itemCount: _matches.isEmpty ? 1 : _matches.length,
       itemBuilder: (context, index) {
@@ -1342,9 +1402,20 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                           child: Text(
                             'Live: Game $currentGame - $team1Score : $team2Score',
                             style: GoogleFonts.poppins(
-                              color: const Color.fromARGB(255, 231, 227, 227),
+                              color: Colors.white,
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      if (match['startTime'] != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            'Scheduled: ${DateFormat('MMM dd, yyyy hh:mm a').format((match['startTime'] as Timestamp).toDate())}',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white70,
+                              fontSize: 12,
                             ),
                           ),
                         ),
@@ -1462,334 +1533,37 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
     );
   }
 
-    void _showDeleteConfirmation(BuildContext context, int index) {
-      showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF1B263B),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-            'Confirm Deletion',
-            style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-          content: Text(
-            'Are you sure you want to delete this match? This action cannot be undone.',
-            style: GoogleFonts.poppins(color: Colors.white70),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _deleteMatch(index);
-              },
-              child: Text('Delete', style: GoogleFonts.poppins(color: Colors.redAccent)),
-            ),
-          ],
+  void _showDeleteConfirmation(BuildContext context, int index) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1B263B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Confirm Deletion',
+          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
         ),
-      );
-    }
+        content: Text(
+          'Are you sure you want to delete this match? This action cannot be undone.',
+          style: GoogleFonts.poppins(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteMatch(index);
+            },
+            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
   }
-  
-  // Move TournamentInfoPage OUTSIDE of _TournamentDetailsPageState
-  
-  class TournamentInfoPage extends StatelessWidget {
-    final Tournament tournament;
-    final String creatorName;
-    final List<Map<String, dynamic>> participantDetails;
-  
-    const TournamentInfoPage({
-      super.key,
-      required this.tournament,
-      required this.creatorName,
-      required this.participantDetails,
-    });
-  
-    @override
-    Widget build(BuildContext context) {
-      return Scaffold(
-        backgroundColor: Colors.transparent,
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF0A1325), Color(0xFF1A2A44)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
-          ),
-          child: SafeArea(
-            child: CustomScrollView(
-              slivers: [
-                SliverAppBar(
-                  backgroundColor: Colors.transparent,
-                  elevation: 0,
-                  pinned: true,
-                  leading: IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white70),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                  title: Text(
-                    'Tournament Info',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Tournament Info',
-                          style: GoogleFonts.poppins(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        _buildDetailSection(
-                          title: 'Tournament Details',
-                          children: [
-                            _buildDetailRow(
-                              icon: Icons.sports_tennis,
-                              label: 'Play Style',
-                              value: tournament.gameFormat,
-                            ),
-                            _buildDetailRow(
-                              icon: Icons.location_on,
-                              label: 'Venue',
-                              value: (tournament.venue.isNotEmpty && tournament.city.isNotEmpty)
-                                  ? '${tournament.venue}, ${tournament.city}'
-                                  : 'No Location',
-                            ),
-                            _buildDetailRow(
-                              icon: Icons.calendar_today,
-                              label: 'Date',
-                              value: _formatDateRange(tournament.startDate, tournament.endDate),
-                            ),
-                            _buildDetailRow(
-                              icon: Icons.account_balance_wallet,
-                              label: 'Entry Fee',
-                              value: tournament.entryFee == 0.0
-                                  ? 'Free'
-                                  : '₹${tournament.entryFee.toStringAsFixed(0)}',
-                            ),
-                            _buildDetailRow(
-                              icon: Icons.people,
-                              label: 'Max Participants',
-                              value: '${tournament.maxParticipants}',
-                            ),
-                            _buildDetailRow(
-                              icon: Icons.person,
-                              label: 'Created By',
-                              value: creatorName,
-                            ),
-                            _buildDetailRow(
-                              icon: Icons.description,
-                              label: 'Game Type',
-                              value: tournament.gameType,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        _buildDetailSection(
-                          title: 'Participants Details',
-                          children: [
-                            if (participantDetails.isEmpty)
-                              Text(
-                                'No participants yet.',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  color: Colors.white70,
-                                ),
-                              ),
-                            ...participantDetails.asMap().entries.map((entry) {
-                              final index = entry.key;
-                              final details = entry.value;
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Participant ${index + 1}: ',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          RichText(
-                                            text: TextSpan(
-                                              children: [
-                                                TextSpan(
-                                                  text: '${details['firstName']} ${details['lastName']}',
-                                                  style: GoogleFonts.poppins(
-                                                    fontSize: 14,
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                                TextSpan(
-                                                  text: ' (${details['gender'].capitalize()})',
-                                                  style: GoogleFonts.poppins(
-                                                    fontSize: 12,
-                                                    color: Colors.cyanAccent,
-                                                    fontStyle: FontStyle.italic,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            'Phone: ${details['phone']}',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 14,
-                                              color: Colors.white70,
-                                            ),
-                                          ),
-                                          Text(
-                                            'Email: ${details['email']}',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 14,
-                                              color: Colors.white70,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        _buildDetailSection(
-                          title: 'Rules',
-                          children: [
-                            Text(
-                              tournament.rules.isNotEmpty ? tournament.rules : _defaultBadmintonRules,
-                              style: GoogleFonts.poppins(
-                                fontSize: 14,
-                                color: Colors.white70,
-                                height: 1.6,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 30),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-  
-    Widget _buildDetailSection({
-      required String title,
-      required List<Widget> children,
-    }) {
-      return Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 3,
-              spreadRadius: 1,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-                letterSpacing: 0.5,
-              ),
-            ),
-            const SizedBox(height: 12),
-            ...children,
-          ],
-        ),
-      );
-    }
-  
-    Widget _buildDetailRow({
-      required IconData icon,
-      required String label,
-      required String value,
-    }) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            Icon(icon, color: Colors.cyanAccent, size: 18),
-            const SizedBox(width: 10),
-            Text(
-              '$label: ',
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                color: Colors.white70,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            Expanded(
-              child: Text(
-                value,
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-  
-    String _formatDateRange(DateTime startDate, DateTime? endDate) {
-      if (endDate == null) {
-        return DateFormat('MMM dd, yyyy').format(startDate);
-      }
-      final startDateOnly = DateTime(startDate.year, startDate.month, startDate.day);
-      final endDateOnly = DateTime(endDate.year, endDate.month, endDate.day);
-      if (startDateOnly == endDateOnly) {
-        return DateFormat('MMM dd, yyyy').format(startDate);
-      }
-      if (startDate.year == endDate.year) {
-        return '${DateFormat('MMM dd').format(startDate)} - ${DateFormat('MMM dd, yyyy').format(endDate)}';
-      }
-      return '${DateFormat('MMM dd, yyyy').format(startDate)} - ${DateFormat('MMM dd, yyyy').format(endDate)}';
-    }
-  }
+}
 
 extension StringExtension on String {
   String capitalize() {
