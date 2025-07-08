@@ -1,3 +1,4 @@
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:toastification/toastification.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 
 class EditTournamentPage extends StatefulWidget {
   final Tournament tournament;
@@ -33,24 +35,23 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   late bool _costShared;
   bool _isLoading = false;
   String? _fetchedCity;
-  final bool _isFetchingLocation = false;
+  bool _isFetchingLocation = false;
   bool _isCityValid = true;
   bool _isValidatingCity = false;
   Timer? _debounceTimer;
 
-  final Map<String, String> _validCities = {
-    'hyderabad': 'Hyderabad',
-    'mumbai': 'Mumbai',
-    'delhi': 'Delhi',
-    'bengaluru': 'Bengaluru',
-    'chennai': 'Chennai',
-    'kolkata': 'Kolkata',
-    'pune': 'Pune',
-    'ahmedabad': 'Ahmedabad',
-    'jaipur': 'Jaipur',
-    'lucknow': 'Lucknow',
-    'karimnagar': 'Karimnagar',
-  };
+  // Store initial values to detect changes
+  late String _initialName;
+  late String _initialVenue;
+  late String _initialCity;
+  late String _initialEntryFee;
+  late String _initialRules;
+  late String _initialMaxParticipants;
+  late DateTime _initialStartDate;
+  late TimeOfDay _initialStartTime;
+  late DateTime? _initialEndDate;
+  late bool _initialBringOwnEquipment;
+  late bool _initialCostShared;
 
   final List<String> _gameFormatOptions = [
     'Men\'s Singles',
@@ -72,6 +73,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   @override
   void initState() {
     super.initState();
+    // Initialize form fields
     _nameController.text = widget.tournament.name;
     _venueController.text = widget.tournament.venue;
     _cityController.text = widget.tournament.city;
@@ -93,12 +95,25 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     _selectedEndDate = widget.tournament.endDate;
     _gameFormat = _gameFormatOptions.contains(widget.tournament.gameFormat)
         ? widget.tournament.gameFormat
-        : _gameFormatOptions[0]; // Default to 'Men\'s Singles'
+        : _gameFormatOptions[0];
     _gameType = _gameTypeOptions.contains(widget.tournament.gameType)
         ? widget.tournament.gameType
-        : _gameTypeOptions[0]; // Default to 'Knockout'
+        : _gameTypeOptions[0];
     _bringOwnEquipment = widget.tournament.bringOwnEquipment;
     _costShared = widget.tournament.costShared;
+
+    // Store initial values for change detection
+    _initialName = _nameController.text;
+    _initialVenue = _venueController.text;
+    _initialCity = _cityController.text;
+    _initialEntryFee = _entryFeeController.text;
+    _initialRules = _rulesController.text;
+    _initialMaxParticipants = _maxParticipantsController.text;
+    _initialStartDate = _selectedDate;
+    _initialStartTime = _selectedTime;
+    _initialEndDate = _selectedEndDate;
+    _initialBringOwnEquipment = _bringOwnEquipment;
+    _initialCostShared = _costShared;
   }
 
   @override
@@ -111,6 +126,77 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     _rulesController.dispose();
     _maxParticipantsController.dispose();
     super.dispose();
+  }
+
+  // Check if any changes have been made to the form
+  bool _hasChanges() {
+    return _nameController.text != _initialName ||
+        _venueController.text != _initialVenue ||
+        _cityController.text != _initialCity ||
+        _entryFeeController.text != _initialEntryFee ||
+        _rulesController.text != _initialRules ||
+        _maxParticipantsController.text != _initialMaxParticipants ||
+        _selectedDate != _initialStartDate ||
+        _selectedTime != _initialStartTime ||
+        _selectedEndDate != _initialEndDate ||
+        _bringOwnEquipment != _initialBringOwnEquipment ||
+        _costShared != _initialCostShared;
+  }
+
+  // Show confirmation dialog when attempting to leave with unsaved changes
+  Future<bool> _onWillPop() async {
+    if (!_hasChanges()) {
+      return true; // Allow navigation if no changes
+    }
+
+    final shouldPop = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.black,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.white24),
+        ),
+        title: Text(
+          'Unsaved Changes',
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Text(
+          'You have unsaved changes. Are you sure you want to leave?',
+          style: GoogleFonts.poppins(
+            color: Colors.white70,
+            fontSize: 14,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(
+                color: Colors.blueGrey,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(
+              'Leave',
+              style: GoogleFonts.poppins(
+                color: Colors.red,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return shouldPop ?? false;
   }
 
   Future<void> _selectDate(BuildContext context) async {
@@ -137,14 +223,25 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     if (picked != null && picked != _selectedDate) {
       setState(() {
         _selectedDate = picked;
+        if (_selectedEndDate != null && _selectedEndDate!.isBefore(picked)) {
+          _selectedEndDate = null;
+          _showErrorToast(
+            'End Date Reset',
+            'End date was reset because it was before the new start date. Please select a new end date.',
+          );
+        }
       });
     }
   }
 
   Future<void> _selectEndDate(BuildContext context) async {
+    final initialDate = _selectedEndDate != null && !_selectedEndDate!.isBefore(_selectedDate)
+        ? _selectedEndDate!
+        : _selectedDate;
+
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: _selectedEndDate ?? _selectedDate,
+      initialDate: initialDate,
       firstDate: _selectedDate,
       lastDate: DateTime(2030),
       builder: (context, child) {
@@ -172,7 +269,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   Future<void> _selectTime(BuildContext context) async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
-      initialTime: _selectedTime,
+      initialTime: TimeOfDay.now(),
       builder: (context, child) {
         return Theme(
           data: ThemeData.dark().copyWith(
@@ -213,19 +310,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
       });
     }
 
-    final normalizedCity = city.trim();
-    final normalizedLower = normalizedCity.toLowerCase();
-
-    if (_validCities.containsKey(normalizedLower)) {
-      if (mounted) {
-        setState(() {
-          _cityController.text = _validCities[normalizedLower]!;
-          _isCityValid = true;
-          _isValidatingCity = false;
-        });
-      }
-      return;
-    }
+    final normalizedCity = city.trim().toLowerCase();
 
     try {
       List<Location> locations = await locationFromAddress('$normalizedCity, India');
@@ -237,16 +322,39 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
 
         if (placemarks.isNotEmpty) {
           final place = placemarks.first;
-          final fetchedCity = place.locality?.toLowerCase() ?? place.administrativeArea?.toLowerCase();
-          if (fetchedCity == normalizedLower || _validCities.containsValue(place.locality)) {
+          final fetchedCity = place.locality ?? place.administrativeArea;
+          if (fetchedCity != null) {
             if (mounted) {
               setState(() {
-                _cityController.text = place.locality ?? normalizedCity;
+                _cityController.text = fetchedCity;
                 _isCityValid = true;
                 _isValidatingCity = false;
               });
             }
             return;
+          }
+        }
+      }
+
+      if (normalizedCity.length > 2) {
+        List<Location> suggestionLocations = await locationFromAddress('$normalizedCity, India');
+        if (suggestionLocations.isNotEmpty) {
+          List<Placemark> suggestions = await placemarkFromCoordinates(
+            suggestionLocations.first.latitude,
+            suggestionLocations.first.longitude,
+          );
+          if (suggestions.isNotEmpty) {
+            final suggestedCity = suggestions.first.locality ?? suggestions.first.administrativeArea;
+            if (suggestedCity != null) {
+              if (mounted) {
+                setState(() {
+                  _cityController.text = suggestedCity;
+                  _isCityValid = true;
+                  _isValidatingCity = false;
+                });
+              }
+              return;
+            }
           }
         }
       }
@@ -260,23 +368,13 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         _showErrorToast('Invalid City', 'No matching city found for "$normalizedCity"');
       }
     } catch (e) {
-      if (_validCities.containsKey(normalizedLower)) {
-        if (mounted) {
-          setState(() {
-            _cityController.text = _validCities[normalizedLower]!;
-            _isCityValid = true;
-            _isValidatingCity = false;
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _isCityValid = false;
-            _isValidatingCity = false;
-            _cityController.clear();
-          });
-          _showErrorToast('Invalid City', 'Geocoding failed for "$normalizedCity"');
-        }
+      if (mounted) {
+        setState(() {
+          _isCityValid = false;
+          _isValidatingCity = false;
+          _cityController.clear();
+        });
+        _showErrorToast('Invalid City', 'Geocoding failed for "$normalizedCity": $e');
       }
     }
   }
@@ -286,6 +384,58 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     _debounceTimer = Timer(const Duration(milliseconds: 2000), () {
       _validateCityWithGeocoding(value);
     });
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isFetchingLocation = true;
+    });
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          _showErrorToast('Location Permission Denied', 'Please enable location permissions.');
+          setState(() {
+            _isFetchingLocation = false;
+          });
+          return;
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        _showErrorToast('Location Permission Denied Forever', 'Please enable location permissions in settings.');
+        setState(() {
+          _isFetchingLocation = false;
+        });
+        return;
+      }
+
+      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+
+      if (placemarks.isNotEmpty) {
+        final place = placemarks.first;
+        final city = place.locality ?? place.administrativeArea;
+        if (city != null) {
+          setState(() {
+            _fetchedCity = city;
+            _cityController.text = city;
+            _isCityValid = true;
+            _isFetchingLocation = false;
+          });
+        } else {
+          _showErrorToast('Invalid Location', 'Could not determine a valid city from current location.');
+          setState(() {
+            _isFetchingLocation = false;
+          });
+        }
+      }
+    } catch (e) {
+      _showErrorToast('Location Error', 'Failed to get current location: $e');
+      setState(() {
+        _isFetchingLocation = false;
+      });
+    }
   }
 
   Future<void> _updateTournament() async {
@@ -325,7 +475,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         venue: _venueController.text.trim(),
         city: _cityController.text.trim(),
         startDate: startDateTime,
-        startTime: _selectedTime, // Added required startTime argument
+        startTime: _selectedTime,
         endDate: endDate,
         entryFee: double.tryParse(_entryFeeController.text.trim()) ?? 0.0,
         status: widget.tournament.status,
@@ -338,6 +488,9 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         gameType: _gameType,
         bringOwnEquipment: _bringOwnEquipment,
         costShared: _costShared,
+        teams: widget.tournament.teams,
+        matches: widget.tournament.matches,
+       
       );
 
       await FirebaseFirestore.instance
@@ -386,166 +539,219 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: Text(
-          'Edit Event',
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+    return PopScope(
+      canPop: false, // Prevent default pop until confirmation
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        final shouldPop = await _onWillPop();
+        if (shouldPop && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
         backgroundColor: Colors.black,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              _buildTextField(
-                controller: _nameController,
-                label: 'Event Name',
-                validator: (value) => value?.trim().isEmpty ?? true ? 'Enter a name' : null,
-              ),
-              const SizedBox(height: 16),
-              _buildTextField(
-                controller: _venueController,
-                label: 'Venue',
-                validator: (value) => value?.trim().isEmpty ?? true ? 'Enter a venue' : null,
-              ),
-              const SizedBox(height: 16),
-              _buildCityFieldWithLocation(),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => _selectDate(context),
-                      child: _buildDateTimeField(
-                        label: 'Start Date',
-                        value: DateFormat('MMM dd, yyyy').format(_selectedDate),
+        appBar: AppBar(
+          title: Text(
+            'Edit Event',
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          backgroundColor: Colors.black,
+          iconTheme: const IconThemeData(color: Colors.white),
+        ),
+        body: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Form(
+            key: _formKey,
+            child: ListView(
+              children: [
+                _buildTextField(
+                  controller: _nameController,
+                  label: 'Event Name',
+                  validator: (value) => value?.trim().isEmpty ?? true ? 'Enter a name' : null,
+                ),
+                const SizedBox(height: 16),
+                _buildTextField(
+                  controller: _venueController,
+                  label: 'Venue',
+                  validator: (value) => value?.trim().isEmpty ?? true ? 'Enter a venue' : null,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildTextField(
+                        controller: _cityController,
+                        label: 'City',
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) return 'Enter a city';
+                          return !_isCityValid ? 'Enter a valid Indian city' : null;
+                        },
+                        onChanged: _debounceCityValidation,
+                        suffix: _isValidatingCity
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : Icon(
+                                _isCityValid ? Icons.check_circle : Icons.error,
+                                color: _isCityValid ? Colors.green : Colors.red,
+                                size: 20,
+                              ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => _selectTime(context),
-                      child: _buildDateTimeField(
-                        label: 'Start Time',
-                        value: _selectedTime.format(context),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => _selectEndDate(context),
-                      child: _buildDateTimeField(
-                        label: 'End Date',
-                        value: _selectedEndDate == null
-                            ? 'Select End Date'
-                            : DateFormat('MMM dd, yyyy').format(_selectedEndDate!),
-                      ),
-                    ),
-                  ),
-                  const Expanded(child: SizedBox()),
-                ],
-              ),
-              const SizedBox(height: 16),
-              _buildTextField(
-                controller: _entryFeeController,
-                label: 'Entry Fee',
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) return 'Enter an entry fee';
-                  final fee = double.tryParse(value);
-                  return fee == null || fee < 0 ? 'Enter a valid amount' : null;
-                },
-              ),
-              const SizedBox(height: 16),
-              _buildDropdown(
-                label: 'Game Format',
-                value: _gameFormat,
-                items: _gameFormatOptions,
-                onChanged: (value) => setState(() => _gameFormat = value!),
-                validator: (value) => value == null ? 'Select a game format' : null,
-              ),
-              const SizedBox(height: 16),
-              _buildDropdown(
-                label: 'Game Type',
-                value: _gameType,
-                items: _gameTypeOptions,
-                onChanged: (value) => setState(() => _gameType = value!),
-                validator: (value) => value == null ? 'Select a game type' : null,
-              ),
-              const SizedBox(height: 16),
-              _buildTextField(
-                controller: _maxParticipantsController,
-                label: 'Max Participants',
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) return 'Enter max participants';
-                  final max = int.tryParse(value);
-                  if (max == null || max <= 0) return 'Enter a valid number';
-                  if (max < widget.tournament.participants.length) {
-                    return 'Cannot set max less than current participants (${widget.tournament.participants.length})';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              _buildTextField(
-                controller: _rulesController,
-                label: 'Rules',
-                maxLines: 5,
-                validator: (value) => value?.trim().isEmpty ?? true ? 'Enter the rules' : null,
-              ),
-              const SizedBox(height: 16),
-              _buildSwitchTile(
-                title: 'Bring Own Equipment',
-                subtitle: 'Participants must bring their own equipment',
-                value: _bringOwnEquipment,
-                onChanged: (value) => setState(() => _bringOwnEquipment = value),
-              ),
-              _buildSwitchTile(
-                title: 'Cost Shared',
-                subtitle: 'Costs are shared among participants',
-                value: _costShared,
-                onChanged: (value) => setState(() => _costShared = value),
-              ),
-              const SizedBox(height: 24),
-              GestureDetector(
-                onTap: _isLoading ? null : _updateTournament,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: _isLoading ? Colors.grey[700] : Colors.blueGrey[700],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Center(
-                    child: _isLoading
-                        ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                        : Text(
-                            'Update Event',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
+                    IconButton(
+                      icon: _isFetchingLocation
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : Icon(
+                              Icons.my_location,
+                              color: _fetchedCity != null ? Colors.white : Colors.white54,
+                              size: 20,
                             ),
-                          ),
+                      onPressed: _isFetchingLocation || _fetchedCity != null
+                          ? null
+                          : () => _getCurrentLocation(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _selectDate(context),
+                        child: _buildDateTimeField(
+                          label: 'Start Date',
+                          value: DateFormat('MMM dd, yyyy').format(_selectedDate),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _selectTime(context),
+                        child: _buildDateTimeField(
+                          label: 'Start Time',
+                          value: _selectedTime.format(context),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => _selectEndDate(context),
+                        child: _buildDateTimeField(
+                          label: 'End Date',
+                          value: _selectedEndDate == null
+                              ? 'Select End Date'
+                              : DateFormat('MMM dd, yyyy').format(_selectedEndDate!),
+                        ),
+                      ),
+                    ),
+                    const Expanded(child: SizedBox()),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildTextField(
+                  controller: _entryFeeController,
+                  label: 'Entry Fee',
+                  keyboardType: TextInputType.number,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) return 'Enter an entry fee';
+                    final fee = double.tryParse(value);
+                    return fee == null || fee < 0 ? 'Enter a valid amount' : null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                _buildTextField(
+                  controller: TextEditingController(text: widget.tournament.gameFormat),
+                  label: 'Game Format',
+                  enabled: false,
+                ),
+                const SizedBox(height: 16),
+                _buildTextField(
+                  controller: TextEditingController(text: widget.tournament.gameType),
+                  label: 'Game Type',
+                  enabled: false,
+                ),
+                const SizedBox(height: 16),
+                _buildTextField(
+                  controller: _maxParticipantsController,
+                  label: 'Max Participants',
+                  keyboardType: TextInputType.number,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) return 'Enter max participants';
+                    final max = int.tryParse(value);
+                    if (max == null || max <= 0) return 'Enter a valid number';
+                    if (max < widget.tournament.participants.length) {
+                      return 'Cannot set max less than current participants (${widget.tournament.participants.length})';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                _buildTextField(
+                  controller: _rulesController,
+                  label: 'Rules',
+                  maxLines: 5,
+                  validator: (value) => value?.trim().isEmpty ?? true ? 'Enter the rules' : null,
+                ),
+                const SizedBox(height: 16),
+                _buildSwitchTile(
+                  title: 'Bring Own Equipment',
+                  subtitle: 'Participants must bring their own equipment',
+                  value: _bringOwnEquipment,
+                  onChanged: (value) => setState(() => _bringOwnEquipment = value),
+                ),
+                _buildSwitchTile(
+                  title: 'Cost Shared',
+                  subtitle: 'Costs are shared among participants',
+                  value: _costShared,
+                  onChanged: (value) => setState(() => _costShared = value),
+                ),
+                const SizedBox(height: 24),
+                GestureDetector(
+                  onTap: _isLoading ? null : _updateTournament,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: _isLoading ? Colors.grey[700] : Colors.blueGrey[700],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Center(
+                      child: _isLoading
+                          ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                          : Text(
+                              'Update Event',
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -559,6 +765,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     String? Function(String?)? validator,
     TextInputType keyboardType = TextInputType.text,
     int maxLines = 1,
+    bool enabled = true,
     Widget? suffix,
     ValueChanged<String>? onChanged,
   }) {
@@ -579,6 +786,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         cursorColor: Colors.white,
         keyboardType: keyboardType,
         maxLines: maxLines,
+        enabled: enabled,
         onChanged: onChanged,
         decoration: InputDecoration(
           labelText: label,
@@ -593,56 +801,6 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     );
   }
 
-  Widget _buildCityFieldWithLocation() {
-    return Stack(
-      children: [
-        _buildTextField(
-          controller: _cityController,
-          label: 'City',
-          validator: (value) {
-            if (value == null || value.trim().isEmpty) return 'Enter a city';
-            return !_isCityValid ? 'Enter a valid Indian city' : null;
-          },
-          onChanged: _debounceCityValidation,
-          suffix: _isValidatingCity
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                )
-              : Icon(
-                  _isCityValid ? Icons.check_circle : Icons.error,
-                  color: _isCityValid ? Colors.green : Colors.red,
-                  size: 20,
-                ),
-        ),
-        if (!_isFetchingLocation)
-          Positioned(
-            right: 20,
-            top: 4,
-            child: IconButton(
-              icon: Icon(
-                Icons.my_location,
-                color: _fetchedCity != null ? Colors.white : Colors.white54,
-                size: 20,
-              ),
-              onPressed: _fetchedCity != null
-                  ? () {
-                      setState(() {
-                        _cityController.text = _fetchedCity!;
-                        _isCityValid = _validCities.containsValue(_fetchedCity);
-                      });
-                    }
-                  : null,
-            ),
-          ),
-      ],
-    );
-  }
-
   Widget _buildDateTimeField({required String label, required String value}) {
     return Container(
       decoration: BoxDecoration(
@@ -651,51 +809,24 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         border: Border.all(color: Colors.white24),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Text(
-        value,
-        style: GoogleFonts.poppins(
-          color: Colors.white,
-          fontSize: 14,
-          fontWeight: FontWeight.w400,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDropdown({
-    required String label,
-    required String value,
-    required List<String> items,
-    required ValueChanged<String?> onChanged,
-    String? Function(String?)? validator,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white24),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: DropdownButtonFormField<String>(
-        value: value,
-        items: items.map((item) => DropdownMenuItem(
-              value: item,
-              child: Text(
-                item,
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-            )).toList(),
-        onChanged: onChanged,
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: const TextStyle(color: Colors.white70),
-          border: InputBorder.none,
-        ),
-        dropdownColor: Colors.black,
-        validator: validator,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            value,
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+          if (label == 'End Date' && _selectedEndDate != null && _selectedEndDate!.isBefore(_selectedDate))
+            Icon(
+              Icons.warning_amber_rounded,
+              color: Colors.red,
+              size: 20,
+            ),
+        ],
       ),
     );
   }

@@ -14,6 +14,7 @@ import 'package:game_app/organiser_pages/manage_players_page.dart';
 import 'package:game_app/screens/play_page.dart' show PlayPage;
 import 'package:game_app/screens/player_profile.dart';
 import 'package:game_app/organiser_pages/schedule_page.dart';
+import 'package:game_app/tournaments/history_page.dart';
 import 'package:game_app/tournaments/tournament_details_page.dart';
 import 'package:game_app/tournaments/tournamnet_create.dart';
 import 'package:geocoding/geocoding.dart';
@@ -422,7 +423,7 @@ class _OrganizerHomePageState extends State<OrganizerHomePage> with SingleTicker
     }
   }
 
-void _onItemTapped(int index) {
+  void _onItemTapped(int index) {
     if (index < 0 || index >= 4) {
       debugPrint('Invalid index: $index');
       return;
@@ -432,6 +433,7 @@ void _onItemTapped(int index) {
     }
     debugPrint('Selected tab: $index');
   }
+
   Future<bool?> _showLogoutConfirmationDialog() {
     return showDialog<bool>(
       context: context,
@@ -596,15 +598,15 @@ void _onItemTapped(int index) {
                 ),
               ),
               GestureDetector(
-                    onTap: () => setState(() => _selectedIndex = 3),
-                    child: CircleAvatar(
-                      radius: 40,
-                      backgroundColor: Colors.white10,
-                      backgroundImage: _userData!['profileImage']?.toString().isNotEmpty == true
-                          ? CachedNetworkImageProvider(_userData!['profileImage'])
-                          : const AssetImage('assets/default_profile.png') as ImageProvider,
-                    ),
-                  ),
+                onTap: () => setState(() => _selectedIndex = 3),
+                child: CircleAvatar(
+                  radius: 40,
+                  backgroundColor: Colors.white10,
+                  backgroundImage: _userData!['profileImage']?.toString().isNotEmpty == true
+                      ? CachedNetworkImageProvider(_userData!['profileImage'])
+                      : const AssetImage('assets/default_profile.png') as ImageProvider,
+                ),
+              ),
             ],
           ),
         );
@@ -1104,10 +1106,20 @@ void _onItemTapped(int index) {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _buildQuickActionButton(
-                icon: Icons.add,
-                label: 'New Tournament',
-                color: Colors.blueAccent,
-                onTap: () => setState(() => _selectedIndex = 1),
+                icon: Icons.history,
+                label: 'Tournament History',
+                color: Colors.purpleAccent,
+                onTap: () async {
+                  final authState = context.read<AuthBloc>().state;
+                  if (authState is AuthAuthenticated) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => TournamentHistoryPage(userId: authState.user.uid),
+                      ),
+                    );
+                  }
+                },
               ),
               _buildQuickActionButton(
                 icon: Icons.people,
@@ -1527,43 +1539,43 @@ void _onItemTapped(int index) {
                   : null,
               body: pages[_selectedIndex],
               bottomNavigationBar: BottomNavigationBar(
-  backgroundColor: const Color(0xFF2A324B),
-  selectedItemColor: Colors.white,
-  unselectedItemColor: Colors.white.withOpacity(0.6),
-  currentIndex: _selectedIndex,
-  onTap: _onItemTapped,
-  type: BottomNavigationBarType.fixed,
-  selectedLabelStyle: GoogleFonts.poppins(    
-    fontSize: 12,
-    fontWeight: FontWeight.w500,
-  ),
-  unselectedLabelStyle: GoogleFonts.poppins(
-    fontSize: 12,
-    fontWeight: FontWeight.w500,
-  ),
-  items: const [
-    BottomNavigationBarItem(
-      icon: Icon(Icons.home_outlined),
-      activeIcon: Icon(Icons.home_filled),
-      label: 'Home',
-    ),
-    BottomNavigationBarItem(
-      icon: Icon(Icons.add_circle_outline),
-      activeIcon: Icon(Icons.add_circle),
-      label: 'Create',
-    ),
-    BottomNavigationBarItem(
-      icon: Icon(Icons.sports_tennis_outlined),
-      activeIcon: Icon(Icons.sports_tennis),
-      label: 'Matches',
-    ),
-    BottomNavigationBarItem(
-      icon: Icon(Icons.person_outline),
-      activeIcon: Icon(Icons.person),
-      label: 'Profile',
-    ),
-  ],
-),
+                backgroundColor: const Color(0xFF2A324B),
+                selectedItemColor: Colors.white,
+                unselectedItemColor: Colors.white.withOpacity(0.6),
+                currentIndex: _selectedIndex,
+                onTap: _onItemTapped,
+                type: BottomNavigationBarType.fixed,
+                selectedLabelStyle: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+                unselectedLabelStyle: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+                items: const [
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.home_outlined),
+                    activeIcon: Icon(Icons.home_filled),
+                    label: 'Home',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.add_circle_outline),
+                    activeIcon: Icon(Icons.add_circle),
+                    label: 'Create',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.sports_tennis_outlined),
+                    activeIcon: Icon(Icons.sports_tennis),
+                    label: 'Matches',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.person_outline),
+                    activeIcon: Icon(Icons.person),
+                    label: 'Profile',
+                  ),
+                ],
+              ),
             ),
           );
         },
