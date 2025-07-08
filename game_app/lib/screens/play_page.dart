@@ -706,6 +706,7 @@ class _PlayPageState extends State<PlayPage> {
               sliver: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('tournaments')
+                    .where('status', isEqualTo: 'open')
                     .limit(50)
                     .snapshots(),
                 builder: (context, snapshot) {
@@ -901,17 +902,11 @@ class _PlayPageState extends State<PlayPage> {
                     );
                   }
 
-                  final now = DateTime.now().toLocal(); // Current date and time: 06:51 PM IST, July 08, 2025
+                  final now = DateTime(2025, 6, 22, 23, 12); // 11:12 PM IST, June 22, 2025
                   final filteredTournaments = tournaments.where((tournament) {
                     final name = tournament.name.toLowerCase();
                     final venue = tournament.venue.toLowerCase();
                     final city = tournament.city.toLowerCase();
-                    final endDateTime = DateTime(
-                      tournament.endDate!.year,
-                      tournament.endDate!.month,
-                      tournament.endDate!.day,
-                    );
-                    final isOpen = endDateTime.isAfter(now) || endDateTime.isAtSameMomentAs(now); // Tournament is open if end date is today or future
                     final startDateTime = DateTime(
                       tournament.startDate.year,
                       tournament.startDate.month,
@@ -934,13 +929,12 @@ class _PlayPageState extends State<PlayPage> {
                           startDateTime.isBefore(_filterEndDate!.add(const Duration(days: 1)));
                     }
 
-                    print('Filtering event: ${tournament.name}, city: $city, userCity: ${widget.userCity}, matchesCity: $matchesCity, isOpen: $isOpen');
+                    print('Filtering event: ${tournament.name}, city: $city, userCity: ${widget.userCity}, matchesCity: $matchesCity');
                     return matchesCity &&
                         (name.contains(_searchQuery) ||
                             venue.contains(_searchQuery) ||
                             city.contains(_searchQuery)) &&
                         isFuture &&
-                        isOpen && // Only show tournaments that are still open
                         matchesGameFormat &&
                         matchesDateRange;
                   }).toList();
