@@ -93,7 +93,7 @@ class _PlayPageState extends State<PlayPage> {
   Future<bool> _validateCity(String city) async {
     final trimmedCity = city.trim().toLowerCase();
 
-    if (trimmedCity.isEmpty) return false;
+    if (trimmedCity.isEmpty || trimmedCity == 'unknown') return false;
     if (trimmedCity.length < 5) return false;
 
     if (!_validCities.contains(trimmedCity)) {
@@ -243,7 +243,14 @@ class _PlayPageState extends State<PlayPage> {
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
-                        children: ['All', 'Men\'s Singles', 'Women\'s Singles', 'Men\'s Doubles', 'Women\'s Doubles', 'Mixed Doubles']
+                        children: [
+                          'All',
+                          'Men\'s Singles',
+                          'Women\'s Singles',
+                          'Men\'s Doubles',
+                          'Women\'s Doubles',
+                          'Mixed Doubles'
+                        ]
                             .map((format) => ChoiceChip(
                                   label: Text(
                                     format,
@@ -287,7 +294,7 @@ class _PlayPageState extends State<PlayPage> {
                                 final picked = await showDatePicker(
                                   context: context,
                                   initialDate: DateTime.now(),
-                                  firstDate: DateTime.now(),
+                                  firstDate: DateTime.now().subtract(const Duration(days: 365)),
                                   lastDate: DateTime(2100),
                                   builder: (context, child) {
                                     return Theme(
@@ -336,7 +343,7 @@ class _PlayPageState extends State<PlayPage> {
                                 final picked = await showDatePicker(
                                   context: context,
                                   initialDate: tempStartDate ?? DateTime.now(),
-                                  firstDate: tempStartDate ?? DateTime.now(),
+                                  firstDate: tempStartDate ?? DateTime.now().subtract(const Duration(days: 365)),
                                   lastDate: DateTime(2100),
                                   builder: (context, child) {
                                     return Theme(
@@ -393,7 +400,7 @@ class _PlayPageState extends State<PlayPage> {
                                 });
                               },
                               style: TextButton.styleFrom(
-                                backgroundColor: Colors.grey[100],
+                                backgroundColor: Colors.grey[200],
                                 padding: const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
@@ -468,6 +475,230 @@ class _PlayPageState extends State<PlayPage> {
           ),
         ),
         childCount: 3,
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return SliverToBoxAdapter(
+      child: SizedBox(
+        height: 200,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                color: Colors.grey,
+                size: 40,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Error loading events',
+                style: GoogleFonts.poppins(
+                  color: Colors.grey[700],
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              const SizedBox(height: 8),
+              GestureDetector(
+                onTap: () {
+                  setState(() {});
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey),
+                  ),
+                  child: Text(
+                    'Retry',
+                    style: GoogleFonts.poppins(
+                      color: Colors.black,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyWidget() {
+    return SliverToBoxAdapter(
+      child: SizedBox(
+        height: 200,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.event_busy,
+                color: Colors.grey,
+                size: 40,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'No events found.',
+                style: GoogleFonts.poppins(
+                  color: Colors.grey[700],
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocationWidget() {
+    return SliverToBoxAdapter(
+      child: SizedBox(
+        height: 200,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.location_off,
+                color: Colors.grey,
+                size: 40,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Please set your location to view events.',
+                style: GoogleFonts.poppins(
+                  color: Colors.grey[700],
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const PlayerHomePage(),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.blueGrey[700],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Set Location',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _isCityValid = true;
+                      });
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey),
+                      ),
+                      child: Text(
+                        'Use Default (Hyderabad)',
+                        style: GoogleFonts.poppins(
+                          color: Colors.black,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNoResultsWidget() {
+    return SliverToBoxAdapter(
+      child: SizedBox(
+        height: 200,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.search_off,
+                color: Colors.grey,
+                size: 40,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'No events found in ${widget.userCity}.',
+                style: GoogleFonts.poppins(
+                  color: Colors.grey[700],
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  OutlinedButton(
+                    onPressed: () {
+                      setState(() {
+                        _selectedGameFormat = null;
+                        _filterStartDate = null;
+                        _filterEndDate = null;
+                        _searchQuery = '';
+                        _searchController.clear();
+                      });
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.blueGrey[700]!),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      'Clear Filters',
+                      style: GoogleFonts.poppins(
+                        color: Colors.blueGrey[700],
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -718,83 +949,11 @@ class _PlayPageState extends State<PlayPage> {
                     print('Firestore error: ${snapshot.error}');
                     final errorMessage = snapshot.error.toString();
                     _showErrorToast(errorMessage);
-                    return SliverToBoxAdapter(
-                      child: SizedBox(
-                        height: 200,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.error_outline,
-                                color: Colors.grey,
-                                size: 40,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Error loading events',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.grey[700],
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              GestureDetector(
-                                onTap: () {
-                                  setState(() {});
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey[100],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.grey),
-                                  ),
-                                  child: Text(
-                                    'Retry',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.black,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
+                    return _buildErrorWidget();
                   }
                   if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                     print('No events found in Firestore');
-                    return SliverToBoxAdapter(
-                      child: SizedBox(
-                        height: 200,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.event_busy,
-                                color: Colors.grey,
-                                size: 40,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'No events found.',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.grey[700],
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
+                    return _buildEmptyWidget();
                   }
 
                   final totalDocs = snapshot.data!.docs.length;
@@ -802,9 +961,15 @@ class _PlayPageState extends State<PlayPage> {
                   final tournaments = snapshot.data!.docs
                       .map((doc) {
                         try {
-                          return Tournament.fromFirestore(doc.data() as Map<String, dynamic>, doc.id);
+                          final tournament = Tournament.fromFirestore(doc.data() as Map<String, dynamic>, doc.id);
+                          print('Parsed tournament: ${tournament.name}, id: ${tournament.id}, status: ${tournament.status}, startDate: ${tournament.startDate}, endDate: ${tournament.endDate}');
+                          if (tournament.status != 'open') {
+                            print('Skipping tournament ${tournament.id} with status ${tournament.status}');
+                            return null;
+                          }
+                          return tournament;
                         } catch (e) {
-                          print('Error parsing event: $e');
+                          print('Error parsing event ${doc.id}: $e');
                           failedCount++;
                           return null;
                         }
@@ -819,122 +984,52 @@ class _PlayPageState extends State<PlayPage> {
 
                   if (!_isCityValid || widget.userCity.isEmpty || widget.userCity.toLowerCase() == 'unknown') {
                     print('User city is invalid, empty, or unknown, prompting user to set location');
-                    return SliverToBoxAdapter(
-                      child: SizedBox(
-                        height: 200,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.location_off,
-                                color: Colors.grey,
-                                size: 40,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Please set your location to view events.',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.grey[700],
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  GestureDetector(
-                                    onTap: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => const PlayerHomePage(),
-                                        ),
-                                      );
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blueGrey[700],
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        'Set Location',
-                                        style: GoogleFonts.poppins(
-                                          color: Colors.white,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        _isCityValid = true;
-                                      });
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey[100],
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: Colors.grey),
-                                      ),
-                                      child: Text(
-                                        'Use Default (Hyderabad)',
-                                        style: GoogleFonts.poppins(
-                                          color: Colors.black,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
+                    return _buildLocationWidget();
                   }
 
-                  final now = DateTime(2025, 6, 22, 23, 12); // 11:12 PM IST, June 22, 2025
+                  final now = DateTime.now(); // Current date: July 9, 2025, 11:44 AM IST
+                  print('Current time: $now');
                   final filteredTournaments = tournaments.where((tournament) {
                     final name = tournament.name.toLowerCase();
                     final venue = tournament.venue.toLowerCase();
                     final city = tournament.city.toLowerCase();
-                    final startDateTime = DateTime(
-                      tournament.startDate.year,
-                      tournament.startDate.month,
-                      tournament.startDate.day,
-                      tournament.startTime.hour,
-                      tournament.startTime.minute,
-                    );
-                    final isFuture = startDateTime.isAfter(now);
                     final matchesCity = city == widget.userCity.toLowerCase();
+
+                    // Include tournaments where endDate is null or after current date
+                    final isNotCompleted = tournament.endDate == null || tournament.endDate!.isAfter(now);
 
                     bool matchesGameFormat = _selectedGameFormat == null ||
                         tournament.gameFormat == _selectedGameFormat;
 
                     bool matchesDateRange = true;
                     if (_filterStartDate != null) {
+                      final startDateTime = DateTime(
+                        tournament.startDate.year,
+                        tournament.startDate.month,
+                        tournament.startDate.day,
+                        tournament.startTime.hour,
+                        tournament.startTime.minute,
+                      );
                       matchesDateRange = startDateTime.isAfter(_filterStartDate!);
                     }
                     if (_filterEndDate != null) {
+                      final startDateTime = DateTime(
+                        tournament.startDate.year,
+                        tournament.startDate.month,
+                        tournament.startDate.day,
+                        tournament.startTime.hour,
+                        tournament.startTime.minute,
+                      );
                       matchesDateRange = matchesDateRange &&
                           startDateTime.isBefore(_filterEndDate!.add(const Duration(days: 1)));
                     }
 
-                    print('Filtering event: ${tournament.name}, city: $city, userCity: ${widget.userCity}, matchesCity: $matchesCity');
+                    print('Filtering event: ${tournament.name}, id: ${tournament.id}, city: $city, userCity: ${widget.userCity}, matchesCity: $matchesCity, isNotCompleted: $isNotCompleted, matchesGameFormat: $matchesGameFormat, matchesDateRange: $matchesDateRange');
                     return matchesCity &&
                         (name.contains(_searchQuery) ||
                             venue.contains(_searchQuery) ||
                             city.contains(_searchQuery)) &&
-                        isFuture &&
+                        isNotCompleted &&
                         matchesGameFormat &&
                         matchesDateRange;
                   }).toList();
@@ -965,64 +1060,7 @@ class _PlayPageState extends State<PlayPage> {
 
                   if (filteredTournaments.isEmpty) {
                     print('No matching events after filtering');
-                    return SliverToBoxAdapter(
-                      child: SizedBox(
-                        height: 200,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.search_off,
-                                color: Colors.grey,
-                                size: 40,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'No events found in ${widget.userCity}.',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.grey[700],
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const SizedBox(width: 16),
-                                  OutlinedButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        _selectedGameFormat = null;
-                                        _filterStartDate = null;
-                                        _filterEndDate = null;
-                                        _searchQuery = '';
-                                        _searchController.clear();
-                                      });
-                                    },
-                                    style: OutlinedButton.styleFrom(
-                                      side: BorderSide(color: Colors.blueGrey[700]!),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      'Clear Filters',
-                                      style: GoogleFonts.poppins(
-                                        color: Colors.blueGrey[700],
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
+                    return _buildNoResultsWidget();
                   }
 
                   print('Displaying ${filteredTournaments.length} events');

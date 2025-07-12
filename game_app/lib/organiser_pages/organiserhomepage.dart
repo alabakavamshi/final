@@ -60,7 +60,6 @@ class _OrganizerHomePageState extends State<OrganizerHomePage> with SingleTicker
   String? _toastMessage;
   ToastificationType? _toastType;
   List<Map<String, dynamic>> _upcomingTournaments = [];
-  List<Map<String, dynamic>> _recentActivities = [];
   Map<String, dynamic>? _userData;
 
   @override
@@ -214,31 +213,6 @@ class _OrganizerHomePageState extends State<OrganizerHomePage> with SingleTicker
     });
   }
 
-  Stream<List<Map<String, dynamic>>> _recentActivitiesStream() {
-    final authState = context.read<AuthBloc>().state;
-    if (authState is! AuthAuthenticated) {
-      return Stream.value([]);
-    }
-
-    return FirebaseFirestore.instance
-        .collection('organizer_activities')
-        .doc(authState.user.uid)
-        .collection('activities')
-        .orderBy('timestamp', descending: true)
-        .limit(3)
-        .snapshots()
-        .map((querySnapshot) {
-      return querySnapshot.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'type': data['type']?.toString() ?? 'activity',
-          'message': data['message']?.toString() ?? 'Organizer activity',
-          'timestamp': data['timestamp'] ?? Timestamp.now(),
-          'tournamentId': data['tournamentId']?.toString(),
-        };
-      }).toList();
-    });
-  }
 
   @override
   void dispose() {
@@ -913,174 +887,8 @@ class _OrganizerHomePageState extends State<OrganizerHomePage> with SingleTicker
     }
   }
 
-  Widget _buildRecentActivities() {
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: _recentActivitiesStream(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+ 
 
-        if (snapshot.hasError) {
-          return const Center(
-            child: Text(
-              'Error loading recent activities',
-              style: TextStyle(color: Colors.red),
-            ),
-          );
-        }
-
-        _recentActivities = snapshot.data ?? [];
-
-        return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Recent Activities',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Icon(Icons.history, color: Colors.white70),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (_recentActivities.isEmpty)
-                Text(
-                  'No recent activities found',
-                  style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14),
-                )
-              else
-                ..._recentActivities.map((activity) {
-                  final timestamp = (activity['timestamp'] as Timestamp).toDate();
-                  final tournamentId = activity['tournamentId'] as String?;
-                  return GestureDetector(
-                    onTap: tournamentId != null
-                        ? () async {
-                            final tournamentDoc = await FirebaseFirestore.instance
-                                .collection('tournaments')
-                                .doc(tournamentId)
-                                .get();
-                            final tournamentData = tournamentDoc.data();
-                            if (tournamentData != null && mounted) {
-                              final tournament = Tournament.fromFirestore(tournamentData, tournamentDoc.id);
-                              final creatorDoc = await FirebaseFirestore.instance
-                                  .collection('users')
-                                  .doc(tournament.createdBy)
-                                  .get();
-                              final creatorName = creatorDoc.data()?['firstName']?.toString().isNotEmpty == true
-                                  ? '${StringExtension(creatorDoc.data()!['firstName'].toString()).capitalize()} ${creatorDoc.data()!['lastName']?.toString().isNotEmpty == true ? StringExtension(creatorDoc.data()!['lastName'].toString()).capitalize() : ''}'
-                                  : 'Organizer';
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => TournamentDetailsPage(
-                                    tournament: tournament,
-                                    creatorName: creatorName,
-                                  ),
-                                ),
-                              );
-                            } else if (mounted) {
-                              setState(() {
-                                _showToast = true;
-                                _toastMessage = 'Tournament not found';
-                                _toastType = ToastificationType.error;
-                              });
-                            }
-                          }
-                        : null,
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white10,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: _getActivityColor(activity['type']),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              _getActivityIcon(activity['type']),
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  activity['message'],
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                Text(
-                                  DateFormat('MMM dd, hh:mm a').format(timestamp),
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Color _getActivityColor(String type) {
-    switch (type) {
-      case 'tournament_created':
-        return Colors.blueAccent.withOpacity(0.2);
-      case 'player_registered':
-        return Colors.amber.withOpacity(0.2);
-      case 'match_completed':
-        return Colors.greenAccent.withOpacity(0.2);
-      default:
-        return Colors.purpleAccent.withOpacity(0.2);
-    }
-  }
-
-  IconData _getActivityIcon(String type) {
-    switch (type) {
-      case 'tournament_created':
-        return Icons.add_box;
-      case 'player_registered':
-        return Icons.person_add;
-      case 'match_completed':
-        return Icons.sports_score;
-      default:
-        return Icons.notifications;
-    }
-  }
 
   Widget _buildQuickActions() {
     return Container(
@@ -1107,7 +915,7 @@ class _OrganizerHomePageState extends State<OrganizerHomePage> with SingleTicker
             children: [
               _buildQuickActionButton(
                 icon: Icons.history,
-                label: 'Tournament History',
+                label: 'History',
                 color: Colors.purpleAccent,
                 onTap: () async {
                   final authState = context.read<AuthBloc>().state;
@@ -1436,7 +1244,7 @@ class _OrganizerHomePageState extends State<OrganizerHomePage> with SingleTicker
                   _buildWelcomeCard(),
                   _buildQuickActions(),
                   _buildUpcomingTournaments(),
-                  _buildRecentActivities(),
+                 
                   const SizedBox(height: 20),
                 ],
               ),

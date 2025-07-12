@@ -18,6 +18,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 
+class StringExtension {
+  StringExtension(this.value);
+  final String value;
+
+  String capitalize() {
+    if (value.isEmpty) return value;
+    return '${value[0].toUpperCase()}${value.substring(1).toLowerCase()}';
+  }
+}
+
 class UmpireHomePage extends StatefulWidget {
   const UmpireHomePage({super.key});
 
@@ -42,7 +52,6 @@ class _UmpireHomePageState extends State<UmpireHomePage> with SingleTickerProvid
   bool _hasNavigated = false;
   Map<String, dynamic>? _userData;
   List<Map<String, dynamic>> _upcomingMatches = [];
-  List<Map<String, dynamic>> _recentActivities = [];
 
   @override
   void initState() {
@@ -141,85 +150,141 @@ class _UmpireHomePageState extends State<UmpireHomePage> with SingleTickerProvid
   Stream<List<Map<String, dynamic>>> _upcomingMatchesStream() {
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) {
+      debugPrint('No authenticated user found');
       return Stream.value([]);
     }
 
     final umpireEmail = authState.user.email?.toLowerCase().trim();
+    debugPrint('Authenticated umpire email: $umpireEmail');
+
     return FirebaseFirestore.instance
         .collection('tournaments')
         .snapshots()
         .map((querySnapshot) {
       List<Map<String, dynamic>> upcomingMatches = [];
       final now = DateTime.now();
+      debugPrint('Fetched ${querySnapshot.docs.length} tournaments');
 
       for (var tournamentDoc in querySnapshot.docs) {
         final tournamentData = tournamentDoc.data();
         final matches = tournamentData['matches'] as List<dynamic>? ?? [];
+        debugPrint('Tournament ${tournamentDoc.id}: ${matches.length} matches');
 
         for (var match in matches) {
           try {
             final matchData = match as Map<String, dynamic>;
-            if (matchData['completed'] == true) continue;
+            if (matchData['completed'] == true) {
+              debugPrint('Skipping completed match: ${matchData['matchId']}');
+              continue;
+            }
 
-            final matchUmpire = matchData['umpire'] as Map<String, dynamic>?;
-            if (matchUmpire == null) continue;
+            String? matchUmpireEmail;
+            if (matchData['umpire'] is Map<String, dynamic>?) {
+              final matchUmpire = matchData['umpire'] as Map<String, dynamic>?;
+              matchUmpireEmail = (matchUmpire?['email'] as String?)?.toLowerCase().trim();
+            } else if (matchData['umpireEmail'] is String?) {
+              matchUmpireEmail = (matchData['umpireEmail'] as String?)?.toLowerCase().trim();
+            }
 
-            final matchUmpireEmail = (matchUmpire['email'] as String?)?.toLowerCase().trim();
-            if (matchUmpireEmail != umpireEmail) continue;
+            if (matchUmpireEmail == null) {
+              debugPrint('No umpire assigned for match: ${matchData['matchId']}');
+              continue;
+            }
+
+            if (matchUmpireEmail != umpireEmail) {
+              debugPrint('Match ${matchData['matchId']} assigned to different umpire: $matchUmpireEmail');
+              continue;
+            }
 
             final matchStartTime = matchData['startTime'] as Timestamp?;
-            if (matchStartTime == null) continue;
+            if (matchStartTime == null) {
+              debugPrint('No startTime for match: ${matchData['matchId']}');
+              continue;
+            }
 
             final matchTime = matchStartTime.toDate();
             final isLive = (matchData['liveScores'] as Map<String, dynamic>?)?['isLive'] == true;
+            final status = isLive
+                ? 'LIVE'
+                : matchTime.isAfter(now)
+                    ? 'SCHEDULED'
+                    : 'PAST';
 
-            if (isLive || matchTime.isAfter(now)) {
-              upcomingMatches.add({
-                'id': matchData['matchId'] as String? ?? 'no_id',
-                'tournamentId': tournamentDoc.id,
-                'name': '${tournamentData['name'] as String? ?? 'Tournament'} - ${matchData['matchId'] ?? 'Match'}',
-                'startDate': matchStartTime,
-                'location': tournamentData['venue'] as String? ?? 
-                           tournamentData['city'] as String? ?? 'Unknown venue',
-                'status': isLive ? 'live' : 'scheduled',
-                'player1': matchData['player1'] as String? ?? 'Player 1',
-                'player2': matchData['player2'] as String? ?? 'Player 2',
-              });
-            }
+            debugPrint('Processing match: ${matchData['matchId']}, isLive: $isLive, startTime: $matchTime, status: $status');
+            upcomingMatches.add({
+              'id': matchData['matchId'] as String? ?? 'match_${tournamentDoc.id}_${matches.indexOf(match)}',
+              'tournamentId': tournamentDoc.id,
+              'name': '${tournamentData['name'] as String? ?? 'Tournament'} - ${matchData['matchId'] ?? 'Match ${matches.indexOf(match) + 1}'}',
+              'startDate': matchStartTime,
+              'location': (tournamentData['venue'] as String?)?.isNotEmpty == true && (tournamentData['city'] as String?)?.isNotEmpty == true
+                  ? '${tournamentData['venue']}, ${tournamentData['city']}'
+                  : tournamentData['city'] as String? ?? 'Unknown venue',
+              'status': status,
+              'player1Id': matchData['player1Id'] as String? ?? 'Unknown',
+              'player2Id': matchData['player2Id'] as String? ?? 'Unknown',
+              'isDoubles': matchData['isDoubles'] ?? false,
+              'tournamentName': tournamentData['name'] as String? ?? 'Unknown Tournament',
+            });
           } catch (e) {
             debugPrint('[ERROR] Processing match in stream: $e');
           }
         }
       }
+      debugPrint('Upcoming matches count: ${upcomingMatches.length}');
       return upcomingMatches.take(5).toList();
     });
   }
 
-  Stream<List<Map<String, dynamic>>> _recentActivitiesStream() {
-    final authState = context.read<AuthBloc>().state;
-    if (authState is! AuthAuthenticated) {
-      return Stream.value([]);
+  Future<List<Map<String, String>>> _fetchPlayerNames(List<Map<String, dynamic>> matches) async {
+    final List<Map<String, String>> playerNames = [];
+    final Set<String> uniqueIds = {};
+
+    for (var match in matches) {
+      final player1Id = match['player1Id'] as String?;
+      final player2Id = match['player2Id'] as String?;
+      if (player1Id != null && player1Id != 'Unknown') uniqueIds.add(player1Id);
+      if (player2Id != null && player2Id != 'Unknown') uniqueIds.add(player2Id);
     }
 
-    return FirebaseFirestore.instance
-        .collection('umpire_activities')
-        .doc(authState.user.uid)
-        .collection('activities')
-        .orderBy('timestamp', descending: true)
-        .limit(3)
-        .snapshots()
-        .map((querySnapshot) {
-      return querySnapshot.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'type': data['type']?.toString() ?? 'activity',
-          'message': data['message']?.toString() ?? 'Umpire activity',
-          'timestamp': data['timestamp'] ?? Timestamp.now(),
-          'matchId': data['matchId']?.toString(),
-          'tournamentId': data['tournamentId']?.toString(),
-        };
-      }).toList();
-    });
+    if (uniqueIds.isEmpty) {
+      debugPrint('No unique player IDs to fetch');
+      return playerNames;
+    }
+
+    debugPrint('Fetching player names for IDs: $uniqueIds');
+    final userDocs = await FirebaseFirestore.instance
+        .collection('users')
+        .where(FieldPath.documentId, whereIn: uniqueIds.toList())
+        .get();
+
+    for (var doc in userDocs.docs) {
+      final data = doc.data();
+      final name = '${data['firstName'] ?? 'Unknown'} ${data['lastName'] ?? ''}'.trim();
+      playerNames.add({
+        'id': doc.id,
+        'name': name.isEmpty ? 'Unknown Player' : name,
+      });
+      debugPrint('Fetched player: ${doc.id} - $name');
+    }
+
+    return playerNames;
+  }
+
+  Color _getMatchStatusColor(String status) {
+    switch (status.toUpperCase()) {
+      case 'SCHEDULED':
+        return Colors.blueAccent;
+      case 'LIVE':
+        return Colors.greenAccent;
+      case 'PAST':
+        return Colors.grey;
+      case 'COMPLETED':
+        return Colors.purpleAccent;
+      case 'CANCELLED':
+        return Colors.redAccent;
+      default:
+        return Colors.grey;
+    }
   }
 
   @override
@@ -879,377 +944,180 @@ class _UmpireHomePageState extends State<UmpireHomePage> with SingleTickerProvid
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-
         if (snapshot.hasError) {
-          return const Center(
-            child: Text(
-              'Error loading matches',
-              style: TextStyle(color: Colors.red),
-            ),
-          );
+          debugPrint('Snapshot error: ${snapshot.error}');
+          return const Center(child: Text('Error loading matches', style: TextStyle(color: Colors.red)));
         }
-
         _upcomingMatches = snapshot.data ?? [];
+        debugPrint('Upcoming matches: $_upcomingMatches');
 
-        return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return FutureBuilder<List<Map<String, String>>>(
+          future: _fetchPlayerNames(_upcomingMatches),
+          builder: (context, playerNamesSnapshot) {
+            if (playerNamesSnapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (playerNamesSnapshot.hasError || !playerNamesSnapshot.hasData) {
+              debugPrint('Player names error: ${playerNamesSnapshot.error}');
+              return const Center(child: Text('Error loading player names', style: TextStyle(color: Colors.red)));
+            }
+
+            final playerNames = playerNamesSnapshot.data ?? [];
+            final playerNameMap = {for (var p in playerNames) p['id']!: p['name']!};
+            debugPrint('Player name map: $playerNameMap');
+
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(16)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Upcoming Matches',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Upcoming Matches', style: GoogleFonts.poppins(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                      const Icon(Icons.sports_tennis, color: Colors.amber),
+                    ],
                   ),
-                  const Icon(Icons.sports_tennis, color: Colors.amber),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (_upcomingMatches.isEmpty)
-                Column(
-                  children: [
-                    Text(
-                      'No upcoming matches assigned',
-                      style: GoogleFonts.poppins(
-                        color: Colors.white70,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () => setState(() => _selectedIndex = 1),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        'View Matches',
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              else
-                ..._upcomingMatches.map((match) {
-                  final startDate = (match['startDate'] as Timestamp).toDate();
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white10,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 12),
+                  if (_upcomingMatches.isEmpty)
+                    Column(
                       children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: _getMatchStatusColor(match['status']),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Column(
-                                children: [
-                                  Text(
-                                    'Date',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.white70,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  Text(
-                                    DateFormat('MMM').format(startDate).toUpperCase(),
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  Text(
-                                    DateFormat('dd').format(startDate),
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    match['name'],
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.location_on, size: 14, color: Colors.white70),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        match['location'],
-                                        style: GoogleFonts.poppins(
-                                          color: Colors.white70,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  Text(
-                                    '${match['player1']} vs ${match['player2']}',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.white70,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: _getMatchStatusColor(match['status']).withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                match['status'].toUpperCase(),
-                                style: GoogleFonts.poppins(
-                                  color: _getMatchStatusColor(match['status']),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => MatchDetailsPage(
-                                      matchId: match['id'],
-                                      tournamentId: match['tournamentId'],
-                                    ),
-                                  ),
-                                );
-                              },
-                              style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                              child: Text(
-                                'Manage >',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.blueAccent,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ],
+                        Text('No matches assigned', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14)),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: () => setState(() => _selectedIndex = 1),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                          child: Text('View Matches', style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w500)),
                         ),
                       ],
-                    ),
-                  );
-                }),
-            ],
-          ),
-        );
-      },
-    );
-  }
+                    )
+                  else
+                    ..._upcomingMatches.map((match) {
+                      final startDate = (match['startDate'] as Timestamp).toDate();
+                      final player1Id = match['player1Id'] as String?;
+                      final player2Id = match['player2Id'] as String?;
+                      final player1Name = playerNameMap[player1Id] ?? player1Id ?? 'Unknown Player';
+                      final player2Name = playerNameMap[player2Id] ?? player2Id ?? 'Unknown Player';
+                      final tournamentName = match['tournamentName'] as String? ?? 'Unknown Tournament';
+                      debugPrint('Match: $match, Player1: $player1Name, Player2: $player2Name, Tournament: $tournamentName');
 
-  Color _getMatchStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'scheduled':
-        return Colors.blueAccent;
-      case 'live':
-        return Colors.greenAccent;
-      case 'completed':
-        return Colors.purpleAccent;
-      case 'cancelled':
-        return Colors.redAccent;
-      default:
-        return Colors.grey;
-    }
-  }
+                      return GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => MatchDetailsPage(
+                                matchId: match['id'],
+                                tournamentId: match['tournamentId'],
+                              ),
+                            ),
+                          );
+                        },
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(color: _getMatchStatusColor(match['status']), borderRadius: BorderRadius.circular(8)),
+                                    child: Column(
+                                      children: [
+                                        Text('Date', style: GoogleFonts.poppins(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w500)),
+                                        Text(DateFormat('MMM').format(startDate).toUpperCase(), style: GoogleFonts.poppins(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                        Text(DateFormat('dd').format(startDate), style: GoogleFonts.poppins(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
 
-  Widget _buildRecentActivities() {
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: _recentActivitiesStream(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(tournamentName, style: GoogleFonts.poppins(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            const Icon(Icons.location_on, size: 14, color: Colors.white70),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              match['location'] as String,
+                                              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          match['isDoubles'] ? 'Doubles' : 'Singles',
+                                          style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            Text(
+                                              player1Name,
+                                              style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'vs',
+                                              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                player2Name,
+                                                style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        
+                                      ],
+                                    ),
 
-        if (snapshot.hasError) {
-          return const Center(
-            child: Text(
-              'Error loading recent activities',
-              style: TextStyle(color: Colors.red),
-            ),
-          );
-        }
-
-        _recentActivities = snapshot.data ?? [];
-
-        return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Recent Activities',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Icon(Icons.history, color: Colors.white70),
+                                  ),
+                                  Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: _getMatchStatusColor(match['status']).withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: Text(
+                                            match['status'].toUpperCase(),
+                                            style: GoogleFonts.poppins(
+                                              color: _getMatchStatusColor(match['status']),
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
                 ],
               ),
-              const SizedBox(height: 12),
-              if (_recentActivities.isEmpty)
-                Text(
-                  'No recent activities found',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white70,
-                    fontSize: 14,
-                  ),
-                )
-              else
-                ..._recentActivities.map((activity) {
-                  final timestamp = (activity['timestamp'] as Timestamp).toDate();
-                  return GestureDetector(
-                    onTap: activity['matchId'] != null && activity['tournamentId'] != null
-                        ? () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => MatchDetailsPage(
-                                  matchId: activity['matchId'],
-                                  tournamentId: activity['tournamentId'],
-                                ),
-                              ),
-                            );
-                          }
-                        : null,
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white10,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: _getActivityColor(activity['type']),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              _getActivityIcon(activity['type']),
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  activity['message'],
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                Text(
-                                  DateFormat('MMM dd, hh:mm a').format(timestamp),
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }),
-            ],
-          ),
+            );
+          },
         );
       },
     );
-  }
-
-  Color _getActivityColor(String type) {
-    switch (type) {
-      case 'match':
-        return Colors.greenAccent.withOpacity(0.2);
-      case 'tournament':
-        return Colors.blueAccent.withOpacity(0.2);
-      case 'achievement':
-        return Colors.amber.withOpacity(0.2);
-      default:
-        return Colors.purpleAccent.withOpacity(0.2);
-    }
-  }
-
-  IconData _getActivityIcon(String type) {
-    switch (type) {
-      case 'match':
-        return Icons.sports_tennis;
-      case 'tournament':
-        return Icons.emoji_events;
-      case 'achievement':
-        return Icons.star;
-      default:
-        return Icons.notifications;
-    }
   }
 
   Widget _buildQuickActions() {
@@ -1569,7 +1437,7 @@ class _UmpireHomePageState extends State<UmpireHomePage> with SingleTickerProvid
           backgroundColor: _toastType == ToastificationType.success
               ? Colors.green
               : _toastType == ToastificationType.error
-                  ? Colors.red
+              ? Colors.red
               : Colors.blue,
           foregroundColor: Colors.white,
           alignment: Alignment.bottomCenter,
@@ -1625,7 +1493,6 @@ class _UmpireHomePageState extends State<UmpireHomePage> with SingleTickerProvid
                   _buildUserWelcomeCard(),
                   _buildQuickActions(),
                   _buildUpcomingMatches(),
-                  _buildRecentActivities(),
                   const SizedBox(height: 20),
                 ],
               ),
@@ -1800,13 +1667,6 @@ class _UmpireHomePageState extends State<UmpireHomePage> with SingleTickerProvid
         },
       ),
     );
-  }
-}
-
-extension StringExtension on String {
-  String capitalize() {
-    if (isEmpty) return this;
-    return '${this[0].toUpperCase()}${substring(1).toLowerCase()}';
   }
 }
 

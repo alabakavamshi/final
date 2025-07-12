@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:toastification/toastification.dart';
 
 class SchedulePage extends StatefulWidget {
   final String userId;
@@ -20,6 +19,7 @@ class _SchedulePageState extends State<SchedulePage> {
   Set<DateTime> _matchDates = {};
   bool _isLoading = true;
   String? _errorMessage;
+  bool _filterMatchesOnly = false;
 
   @override
   void initState() {
@@ -32,8 +32,6 @@ class _SchedulePageState extends State<SchedulePage> {
 
     setState(() => _isLoading = true);
     try {
-      debugPrint('Fetching tournaments for user: ${widget.userId}');
-
       final tournamentsQuery = await FirebaseFirestore.instance
           .collection('tournaments')
           .where('createdBy', isEqualTo: widget.userId)
@@ -41,69 +39,47 @@ class _SchedulePageState extends State<SchedulePage> {
           .orderBy('startDate', descending: false)
           .get();
 
-      debugPrint('Found ${tournamentsQuery.docs.length} tournaments');
-
       final List<Map<String, dynamic>> allMatches = [];
       final Set<DateTime> tournamentDates = {};
       final Set<DateTime> matchDates = {};
 
       for (var doc in tournamentsQuery.docs) {
         final data = doc.data();
-        debugPrint('Processing tournament: ${doc.id}');
-
-        // Debug print tournament dates
         final startDate = (data['startDate'] as Timestamp).toDate();
         final endDate = (data['endDate'] as Timestamp?)?.toDate() ?? startDate;
-        debugPrint('Tournament dates: $startDate to $endDate');
 
-        // Add all dates between start and end date
+        // Add tournament date range
         for (var date = startDate;
             date.isBefore(endDate.add(const Duration(days: 1)));
             date = date.add(const Duration(days: 1))) {
-          final dateOnly = DateTime(date.year, date.month, date.day);
-          tournamentDates.add(dateOnly);
+          tournamentDates.add(DateTime(date.year, date.month, date.day));
         }
 
         // Process matches
         final matches = List<Map<String, dynamic>>.from(data['matches'] ?? []);
-        debugPrint('Found ${matches.length} matches in tournament');
-
         for (var match in matches) {
           if (match['startTime'] != null) {
-            final matchStartTime = (match['startTime'] as Timestamp).toDate();
-            final matchDateOnly = DateTime(
-              matchStartTime.year,
-              matchStartTime.month,
-              matchStartTime.day,
-            );
+            final matchTime = (match['startTime'] as Timestamp).toDate();
+            final matchDate = DateTime(matchTime.year, matchTime.month, matchTime.day);
+            
+            matchDates.add(matchDate);
 
-            debugPrint('Match ${match['matchId']} on $matchStartTime');
-
-            matchDates.add(matchDateOnly);
-
-            if (matchDateOnly.day == _selectedDate.day &&
-                matchDateOnly.month == _selectedDate.month &&
-                matchDateOnly.year == _selectedDate.year) {
-              debugPrint('Match matches selected date!');
+            if (matchDate.day == _selectedDate.day &&
+                matchDate.month == _selectedDate.month &&
+                matchDate.year == _selectedDate.year) {
               allMatches.add({
                 'matchId': match['matchId']?.toString() ?? '',
                 'tournamentId': doc.id,
                 'tournamentName': data['name']?.toString() ?? 'Unnamed Tournament',
                 'player1': match['player1']?.toString() ?? 'TBD',
                 'player2': match['player2']?.toString() ?? 'TBD',
-                'startTime': matchStartTime,
+                'startTime': matchTime,
                 'status': match['status']?.toString() ?? 'scheduled',
               });
             }
-          } else {
-            debugPrint('Match ${match['matchId']} has no startTime');
           }
         }
       }
-
-      debugPrint('Total matches found for selected date: ${allMatches.length}');
-      debugPrint('Tournament dates: ${tournamentDates.length}');
-      debugPrint('Match dates: ${matchDates.length}');
 
       if (mounted) {
         setState(() {
@@ -111,11 +87,9 @@ class _SchedulePageState extends State<SchedulePage> {
           _tournamentDates = tournamentDates;
           _matchDates = matchDates;
           _isLoading = false;
-          _errorMessage = null;
         });
       }
     } catch (e) {
-      debugPrint('Error fetching matches: $e');
       if (mounted) {
         setState(() {
           _errorMessage = 'Failed to load matches: ${e.toString()}';
@@ -125,51 +99,36 @@ class _SchedulePageState extends State<SchedulePage> {
     }
   }
 
-  Future<void> _rescheduleMatch(String tournamentId, String matchId, DateTime newTime) async {
-    try {
-      final tournamentDoc = FirebaseFirestore.instance.collection('tournaments').doc(tournamentId);
-      final tournamentSnapshot = await tournamentDoc.get();
-      final matches = List<Map<String, dynamic>>.from(tournamentSnapshot.data()?['matches'] ?? []);
-      final matchIndex = matches.indexWhere((m) => m['matchId'] == matchId);
-
-      if (matchIndex != -1) {
-        matches[matchIndex]['startTime'] = Timestamp.fromDate(newTime);
-        await tournamentDoc.update({'matches': matches});
-
-        if (mounted) {
-          setState(() {
-            _matches.firstWhere(
-              (m) => m['matchId'] == matchId && m['tournamentId'] == tournamentId,
-            )['startTime'] = newTime;
-          });
-
-          toastification.show(
-            context: context,
-            type: ToastificationType.success,
-            title: const Text('Success'),
-            description: const Text('Match rescheduled'),
-            autoCloseDuration: const Duration(seconds: 3),
-            backgroundColor: Colors.green,
-            foregroundColor: Colors.white,
-          );
-
-          // Refresh the dates
-          _fetchTournamentsAndMatches();
-        }
-      }
-    } catch (e) {
-      debugPrint('Error rescheduling match: $e');
-      if (mounted) {
-        toastification.show(
-          context: context,
-          type: ToastificationType.error,
-          title: const Text('Error'),
-          description: Text('Failed to reschedule match: ${e.toString()}'),
-          autoCloseDuration: const Duration(seconds: 3),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 30)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      selectableDayPredicate: _filterMatchesOnly
+          ? (day) => _matchDates.any((d) => d.isAtSameMomentAs(DateTime(day.year, day.month, day.day)))
+          : null,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Colors.blueAccent,
+              onPrimary: Colors.white,
+              surface: Color(0xFF1B263B),
+              onSurface: Colors.white,
+            ),
+            dialogBackgroundColor: const Color(0xFF0D1B2A),
+          ),
+          child: child!,
         );
-      }
+      },
+    );
+    
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+      });
+      await _fetchTournamentsAndMatches();
     }
   }
 
@@ -181,7 +140,7 @@ class _SchedulePageState extends State<SchedulePage> {
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            itemCount: 60, // Show 60 days
+            itemCount: 60,
             itemBuilder: (context, index) {
               final date = DateTime.now().add(Duration(days: index));
               final dateOnly = DateTime(date.year, date.month, date.day);
@@ -195,14 +154,16 @@ class _SchedulePageState extends State<SchedulePage> {
               final hasMatches = _matchDates.any((d) =>
                   d.day == dateOnly.day && d.month == dateOnly.month && d.year == dateOnly.year);
 
+              if (_filterMatchesOnly && !hasMatches) {
+                return const SizedBox.shrink();
+              }
+
               return GestureDetector(
                 onTap: () {
-                  if (mounted) {
-                    setState(() {
-                      _selectedDate = dateOnly;
-                      _fetchTournamentsAndMatches();
-                    });
-                  }
+                  setState(() {
+                    _selectedDate = dateOnly;
+                  });
+                  _fetchTournamentsAndMatches();
                 },
                 child: Container(
                   width: 60,
@@ -226,23 +187,6 @@ class _SchedulePageState extends State<SchedulePage> {
                                   : Colors.white30,
                       width: hasMatches ? 2 : (hasTournament ? 1.5 : 1),
                     ),
-                    boxShadow: hasMatches
-                        ? [
-                            BoxShadow(
-                              color: Colors.greenAccent.withOpacity(0.3),
-                              blurRadius: 4,
-                              spreadRadius: 1,
-                            )
-                          ]
-                        : hasTournament
-                            ? [
-                                BoxShadow(
-                                  color: Colors.lightGreen.withOpacity(0.2),
-                                  blurRadius: 2,
-                                  spreadRadius: 1,
-                                )
-                              ]
-                            : null,
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -252,7 +196,6 @@ class _SchedulePageState extends State<SchedulePage> {
                         style: GoogleFonts.poppins(
                           color: isSelected ? Colors.white : Colors.white70,
                           fontSize: 10,
-                          fontWeight: hasMatches ? FontWeight.bold : FontWeight.normal,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -261,7 +204,6 @@ class _SchedulePageState extends State<SchedulePage> {
                         style: GoogleFonts.poppins(
                           color: isSelected ? Colors.white : Colors.white70,
                           fontSize: 12,
-                          fontWeight: hasMatches ? FontWeight.bold : FontWeight.normal,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -273,16 +215,6 @@ class _SchedulePageState extends State<SchedulePage> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      if (hasMatches || hasTournament)
-                        Container(
-                          margin: const EdgeInsets.only(top: 4),
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: hasMatches ? Colors.greenAccent : Colors.lightGreen,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -293,13 +225,33 @@ class _SchedulePageState extends State<SchedulePage> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildLegendItem(const Color(0xFF2E7D32), 'Matches'),
-              const SizedBox(width: 16),
-              _buildLegendItem(const Color(0xFF1B5E20), 'Tournaments'),
-              const SizedBox(width: 16),
-              _buildLegendItem(Colors.blueAccent, 'Selected'),
+              Row(
+                children: [
+                  _buildLegendItem(const Color(0xFF2E7D32), 'Match Days'),
+                  const SizedBox(width: 16),
+                  _buildLegendItem(const Color(0xFF1B5E20), 'Tournament Days'),
+                  const SizedBox(width: 16),
+                  _buildLegendItem(Colors.blueAccent, 'Selected'),
+                ],
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.filter_alt,
+                      color: _filterMatchesOnly ? Colors.blueAccent : Colors.white70,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _filterMatchesOnly = !_filterMatchesOnly;
+                      });
+                    },
+                    tooltip: 'Show only days with matches',
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -360,7 +312,6 @@ class _SchedulePageState extends State<SchedulePage> {
       ),
       backgroundColor: backgroundColor,
       visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
   }
 
@@ -380,9 +331,14 @@ class _SchedulePageState extends State<SchedulePage> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.calendar_month, color: Colors.white),
+            onPressed: () => _selectDate(context),
+            tooltip: 'Open calendar',
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _fetchTournamentsAndMatches,
-            tooltip: 'Refresh',
+            tooltip: 'Refresh schedule',
           ),
         ],
       ),
@@ -422,18 +378,6 @@ class _SchedulePageState extends State<SchedulePage> {
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            const SizedBox(height: 16),
-                            ElevatedButton(
-                              onPressed: _fetchTournamentsAndMatches,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blueAccent,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              child: Text(
-                                'Refresh Data',
-                                style: GoogleFonts.poppins(color: Colors.white),
-                              ),
-                            ),
                           ],
                         ),
                       )
@@ -442,9 +386,7 @@ class _SchedulePageState extends State<SchedulePage> {
                         itemCount: _matches.length,
                         itemBuilder: (context, index) {
                           final match = _matches[index];
-                          final startTime = match['startTime'] != null
-                              ? DateFormat('hh:mm a').format(match['startTime'] as DateTime)
-                              : 'Not scheduled';
+                          final startTime = DateFormat('hh:mm a').format(match['startTime'] as DateTime);
                           return Card(
                             color: Colors.white10,
                             margin: const EdgeInsets.only(bottom: 12),
@@ -465,7 +407,6 @@ class _SchedulePageState extends State<SchedulePage> {
                                             fontWeight: FontWeight.w600,
                                             fontSize: 16,
                                           ),
-                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                       _buildMatchStatusChip(match['status']),
@@ -476,12 +417,9 @@ class _SchedulePageState extends State<SchedulePage> {
                                     children: [
                                       const Icon(Icons.event, color: Colors.white70, size: 16),
                                       const SizedBox(width: 4),
-                                      Expanded(
-                                        child: Text(
-                                          match['tournamentName'],
-                                          style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                      Text(
+                                        match['tournamentName'],
+                                        style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
                                       ),
                                     ],
                                   ),
@@ -493,20 +431,6 @@ class _SchedulePageState extends State<SchedulePage> {
                                       Text(
                                         startTime,
                                         style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
-                                      ),
-                                      const Spacer(),
-                                      IconButton(
-                                        icon: const Icon(Icons.edit_calendar, color: Colors.amber, size: 20),
-                                        onPressed: () async {
-                                          final newTime = await showDateTimePicker(context);
-                                          if (newTime != null) {
-                                            await _rescheduleMatch(
-                                              match['tournamentId'],
-                                              match['matchId'],
-                                              newTime,
-                                            );
-                                          }
-                                        },
                                       ),
                                     ],
                                   ),
@@ -521,57 +445,10 @@ class _SchedulePageState extends State<SchedulePage> {
       ),
     );
   }
-
-  Future<DateTime?> showDateTimePicker(BuildContext context) async {
-    final date = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: Colors.blueAccent,
-              onPrimary: Colors.white,
-              surface: Color(0xFF1B263B),
-              onSurface: Colors.white,
-            ),
-            dialogBackgroundColor: const Color(0xFF0D1B2A),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (date == null) return null;
-
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_selectedDate),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: Colors.blueAccent,
-              onPrimary: Colors.white,
-              surface: Color(0xFF1B263B),
-              onSurface: Colors.white,
-            ),
-            dialogBackgroundColor: const Color(0xFF0D1B2A),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (time == null) return null;
-
-    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
-  }
 }
 
 extension StringExtension on String {
   String capitalize() {
-    if (isEmpty) return this;
     return '${this[0].toUpperCase()}${substring(1).toLowerCase()}';
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:game_app/umpire/matchcontrolpage.dart';
+import 'package:toastification/toastification.dart';
 
 class UmpireSchedulePage extends StatefulWidget {
   final String userId;
@@ -20,6 +21,7 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
   Set<DateTime> _matchDates = {};
   bool _isLoading = true;
   String? _errorMessage;
+  bool _filterMatchesOnly = false;
 
   @override
   void initState() {
@@ -39,16 +41,11 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
     });
 
     try {
-      debugPrint('Fetching matches for umpire: ${widget.userEmail}');
-
-      // Get ALL tournaments and filter matches locally
       final tournamentsSnapshot = await FirebaseFirestore.instance
           .collection('tournaments')
           .where('status', whereIn: ['open', 'ongoing'])
           .orderBy('startDate', descending: false)
           .get();
-
-      debugPrint('Found ${tournamentsSnapshot.docs.length} tournaments');
 
       final List<Map<String, dynamic>> allMatches = [];
       final Set<DateTime> matchDates = {};
@@ -57,37 +54,22 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
         final tournamentData = tournamentDoc.data();
         final matches = List<Map<String, dynamic>>.from(tournamentData['matches'] ?? []);
 
-        debugPrint('Processing ${matches.length} matches in tournament ${tournamentDoc.id}');
-
         for (var match in matches) {
           try {
-            // Check umpire assignment at MATCH level
             final matchUmpire = match['umpire'] as Map<String, dynamic>?;
-            if (matchUmpire == null) {
-              debugPrint('Skipping match with no umpire assigned');
-              continue;
-            }
+            if (matchUmpire == null) continue;
 
             final matchUmpireEmail = (matchUmpire['email'] as String?)?.toLowerCase().trim();
-            if (matchUmpireEmail != widget.userEmail.toLowerCase().trim()) {
-              debugPrint('Skipping match - umpire email mismatch');
-              continue;
-            }
+            if (matchUmpireEmail != widget.userEmail.toLowerCase().trim()) continue;
 
-            // Process match time
             final matchStartTime = match['startTime'] as Timestamp?;
-            if (matchStartTime == null) {
-              debugPrint('Skipping match without start time');
-              continue;
-            }
+            if (matchStartTime == null) continue;
 
             final matchTime = matchStartTime.toDate();
             final matchDateOnly = DateTime(matchTime.year, matchTime.month, matchTime.day);
             
-            // Add to match dates for calendar
             matchDates.add(matchDateOnly);
 
-            // Add match if it matches the selected date
             if (matchDateOnly.isAtSameMomentAs(DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day))) {
               allMatches.add({
                 'matchId': match['matchId']?.toString() ?? '',
@@ -115,9 +97,6 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
         }
       }
 
-      debugPrint('Total matches found for selected date: ${allMatches.length}');
-      debugPrint('Match dates: ${matchDates.length}');
-
       if (mounted) {
         setState(() {
           _matches = allMatches;
@@ -136,6 +115,42 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
     }
   }
 
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 30)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      selectableDayPredicate: _filterMatchesOnly
+          ? (day) => _matchDates.any((d) => d.isAtSameMomentAs(DateTime(day.year, day.month, day.day)))
+          : null,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Colors.blueAccent,
+              onPrimary: Colors.white,
+              surface: Color(0xFF1B263B),
+              onSurface: Colors.white,
+            ),
+            dialogBackgroundColor: const Color(0xFF0D1B2A),
+          ),
+          child: child!,
+        );
+      },
+    );
+    
+    if (picked != null && picked != _selectedDate) {
+      if (mounted) {
+        setState(() {
+          _selectedDate = picked;
+        });
+        await _fetchMatches();
+      }
+    }
+  }
+
   Widget _buildCalendarRow() {
     return Column(
       children: [
@@ -150,6 +165,10 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
               final dateOnly = DateTime(date.year, date.month, date.day);
               final isSelected = dateOnly.isAtSameMomentAs(DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day));
               final hasMatches = _matchDates.any((d) => d.isAtSameMomentAs(dateOnly));
+
+              if (_filterMatchesOnly && !hasMatches) {
+                return const SizedBox.shrink();
+              }
 
               return GestureDetector(
                 onTap: () {
@@ -237,11 +256,31 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildLegendItem(const Color(0xFF2E7D32), 'Matches'),
-              const SizedBox(width: 16),
-              _buildLegendItem(Colors.blueAccent, 'Selected'),
+              Row(
+                children: [
+                  _buildLegendItem(const Color(0xFF2E7D32), 'Match Days'),
+                  const SizedBox(width: 16),
+                  _buildLegendItem(Colors.blueAccent, 'Selected'),
+                ],
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.filter_alt,
+                      color: _filterMatchesOnly ? Colors.blueAccent : Colors.white70,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _filterMatchesOnly = !_filterMatchesOnly;
+                      });
+                    },
+                    tooltip: 'Show only days with matches',
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -302,7 +341,6 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
       ),
       backgroundColor: backgroundColor,
       visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
   }
 
@@ -322,9 +360,14 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.calendar_month, color: Colors.white),
+            onPressed: () => _selectDate(context),
+            tooltip: 'Open calendar',
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _fetchMatches,
-            tooltip: 'Refresh',
+            tooltip: 'Refresh schedule',
           ),
         ],
       ),
@@ -381,11 +424,6 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Try selecting another date or refreshing.',
-                              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 14),
-                            ),
                             const SizedBox(height: 16),
                             ElevatedButton(
                               onPressed: _fetchMatches,
@@ -406,9 +444,7 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
                         itemCount: _matches.length,
                         itemBuilder: (context, index) {
                           final match = _matches[index];
-                          final startTime = match['startTime'] != null
-                              ? DateFormat('hh:mm a').format(match['startTime'] as DateTime)
-                              : 'Not scheduled';
+                          final startTime = DateFormat('hh:mm a').format(match['startTime'] as DateTime);
                           return Card(
                             color: Colors.white10,
                             margin: const EdgeInsets.only(bottom: 12),
@@ -429,7 +465,6 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
                                             fontWeight: FontWeight.w600,
                                             fontSize: 16,
                                           ),
-                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                       _buildMatchStatusChip(match['status']),
@@ -440,12 +475,9 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
                                     children: [
                                       const Icon(Icons.event, color: Colors.white70, size: 16),
                                       const SizedBox(width: 4),
-                                      Expanded(
-                                        child: Text(
-                                          match['tournamentName'],
-                                          style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                      Text(
+                                        match['tournamentName'],
+                                        style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
                                       ),
                                     ],
                                   ),
@@ -474,7 +506,7 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
                                             ),
                                           );
                                         },
-                                        tooltip: 'View Details',
+                                        tooltip: 'View match details',
                                       ),
                                     ],
                                   ),
@@ -482,12 +514,9 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
                                     children: [
                                       const Icon(Icons.location_on, color: Colors.white70, size: 16),
                                       const SizedBox(width: 4),
-                                      Expanded(
-                                        child: Text(
-                                          match['location'],
-                                          style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                      Text(
+                                        match['location'],
+                                        style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
                                       ),
                                     ],
                                   ),
@@ -506,7 +535,6 @@ class _UmpireSchedulePageState extends State<UmpireSchedulePage> {
 
 extension StringExtension on String {
   String capitalize() {
-    if (isEmpty) return this;
     return '${this[0].toUpperCase()}${substring(1).toLowerCase()}';
   }
 }

@@ -48,10 +48,7 @@ class _UmpireMatchesPageState extends State<UmpireMatchesPage> {
                   ),
                 ),
                 centerTitle: true,
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white70),
-                  onPressed: () => Navigator.pop(context),
-                ),
+                
               ),
               Expanded(
                 child: BlocBuilder<AuthBloc, AuthState>(

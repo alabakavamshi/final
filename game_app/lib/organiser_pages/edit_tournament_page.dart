@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -28,7 +27,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   final _maxParticipantsController = TextEditingController();
   late DateTime _selectedDate;
   late TimeOfDay _selectedTime;
-  DateTime? _selectedEndDate;
+  late DateTime? _selectedEndDate;
   late String _gameFormat;
   late String _gameType;
   late bool _bringOwnEquipment;
@@ -40,7 +39,6 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   bool _isValidatingCity = false;
   Timer? _debounceTimer;
 
-  // Store initial values to detect changes
   late String _initialName;
   late String _initialVenue;
   late String _initialCity;
@@ -73,7 +71,6 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   @override
   void initState() {
     super.initState();
-    // Initialize form fields
     _nameController.text = widget.tournament.name;
     _venueController.text = widget.tournament.venue;
     _cityController.text = widget.tournament.city;
@@ -91,7 +88,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         : widget.tournament.rules;
     _maxParticipantsController.text = widget.tournament.maxParticipants.toString();
     _selectedDate = widget.tournament.startDate;
-    _selectedTime = TimeOfDay.fromDateTime(widget.tournament.startDate);
+    _selectedTime = widget.tournament.startTime;
     _selectedEndDate = widget.tournament.endDate;
     _gameFormat = _gameFormatOptions.contains(widget.tournament.gameFormat)
         ? widget.tournament.gameFormat
@@ -102,7 +99,6 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     _bringOwnEquipment = widget.tournament.bringOwnEquipment;
     _costShared = widget.tournament.costShared;
 
-    // Store initial values for change detection
     _initialName = _nameController.text;
     _initialVenue = _venueController.text;
     _initialCity = _cityController.text;
@@ -128,7 +124,6 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     super.dispose();
   }
 
-  // Check if any changes have been made to the form
   bool _hasChanges() {
     return _nameController.text != _initialName ||
         _venueController.text != _initialVenue ||
@@ -143,11 +138,8 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         _costShared != _initialCostShared;
   }
 
-  // Show confirmation dialog when attempting to leave with unsaved changes
   Future<bool> _onWillPop() async {
-    if (!_hasChanges()) {
-      return true; // Allow navigation if no changes
-    }
+    if (!_hasChanges()) return true;
 
     final shouldPop = await showDialog<bool>(
       context: context,
@@ -200,10 +192,18 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   }
 
   Future<void> _selectDate(BuildContext context) async {
+    // If the existing startDate is in the past, use it as firstDate to avoid assertion error
+    final firstDate = _selectedDate.isBefore(DateTime.now())
+        ? _selectedDate
+        : DateTime.now();
+    // Use current date as initialDate if startDate is in the past to enforce future selection
+    final initialDate = _selectedDate.isBefore(DateTime.now())
+        ? DateTime.now()
+        : _selectedDate;
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime.now(),
+      initialDate: initialDate,
+      firstDate: firstDate,
       lastDate: DateTime(2030),
       builder: (context, child) {
         return Theme(
@@ -221,6 +221,10 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
       },
     );
     if (picked != null && picked != _selectedDate) {
+      if (picked.isBefore(DateTime.now())) {
+        _showErrorToast('Invalid Start Date', 'Start date cannot be in the past.');
+        return;
+      }
       setState(() {
         _selectedDate = picked;
         if (_selectedEndDate != null && _selectedEndDate!.isBefore(picked)) {
@@ -238,11 +242,11 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     final initialDate = _selectedEndDate != null && !_selectedEndDate!.isBefore(_selectedDate)
         ? _selectedEndDate!
         : _selectedDate;
-
+    final firstDate = _selectedDate;
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: initialDate,
-      firstDate: _selectedDate,
+      firstDate: firstDate,
       lastDate: DateTime(2030),
       builder: (context, child) {
         return Theme(
@@ -269,7 +273,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   Future<void> _selectTime(BuildContext context) async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.now(),
+      initialTime: _selectedTime,
       builder: (context, child) {
         return Theme(
           data: ThemeData.dark().copyWith(
@@ -490,7 +494,6 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         costShared: _costShared,
         teams: widget.tournament.teams,
         matches: widget.tournament.matches,
-       
       );
 
       await FirebaseFirestore.instance
@@ -540,7 +543,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false, // Prevent default pop until confirmation
+      canPop: false,
       onPopInvoked: (didPop) async {
         if (didPop) return;
         final shouldPop = await _onWillPop();
@@ -820,8 +823,14 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
               fontWeight: FontWeight.w400,
             ),
           ),
+          if (label == 'Start Date' && _selectedDate.isBefore(DateTime.now()))
+            const Icon(
+              Icons.warning_amber_rounded,
+              color: Colors.red,
+              size: 20,
+            ),
           if (label == 'End Date' && _selectedEndDate != null && _selectedEndDate!.isBefore(_selectedDate))
-            Icon(
+            const Icon(
               Icons.warning_amber_rounded,
               color: Colors.red,
               size: 20,
