@@ -1,5 +1,6 @@
 import 'dart:core';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
@@ -7,10 +8,18 @@ import 'package:game_app/blocs/auth/auth_bloc.dart';
 import 'package:game_app/blocs/auth/auth_state.dart';
 import 'package:game_app/models/tournament.dart';
 import 'package:game_app/tournaments/match_details_page.dart';
-import 'package:game_app/tournaments/tournament_info_page.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'dart:io';
 import 'package:toastification/toastification.dart';
+
+extension StringExtension on String {
+  String capitalize() {
+    if (isEmpty) return this;
+    return '${this[0].toUpperCase()}${substring(1).toLowerCase()}';
+  }
+}
 
 class TournamentDetailsPage extends StatefulWidget {
   final Tournament tournament;
@@ -35,20 +44,32 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
   late List<Map<String, dynamic>> _participants;
   late List<Map<String, dynamic>> _teams;
   late List<Map<String, dynamic>> _matches;
-  List<Map<String, dynamic>> _participantDetails = [];
   bool _isUmpire = false;
   final GlobalKey _matchesListKey = GlobalKey();
+
+  // Professional color palette
+  final Color _primaryColor = const Color(0xFF0A2647);
+  final Color _secondaryColor = const Color(0xFF144272);
+  final Color _accentColor = const Color(0xFF2C74B3);
+  final Color _textColor = Colors.white;
+  final Color _secondaryText = Colors.white70;
+  final Color _cardBackground = const Color(0xFF1A374D);
+  final Color _successColor = const Color(0xFF4CAF50);
+  final Color _warningColor = const Color(0xFFFFC107);
+  final Color _errorColor = const Color(0xFFF44336);
+  final Color _goldColor = const Color(0xFFFFD700);
+  final Color _silverColor = const Color(0xFFC0C0C0);
+  final Color _bronzeColor = const Color(0xFFCD7F32);
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _participants = List.from(widget.tournament.participants);
     _teams = List.from(widget.tournament.teams);
     _matches = List.from(widget.tournament.matches);
     _checkIfJoined();
     _checkIfUmpire();
-    _fetchParticipantDetails();
     _generateLeaderboardData();
     _listenToTournamentUpdates();
   }
@@ -66,8 +87,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           _participants = List<Map<String, dynamic>>.from(data['participants'] ?? []);
           _teams = List<Map<String, dynamic>>.from(data['teams'] ?? []);
           _matches = List<Map<String, dynamic>>.from(data['matches'] ?? []);
+          widget.tournament.profileImage = data['profileImage']?.toString();
         });
-        _fetchParticipantDetails();
         _generateLeaderboardData();
       }
     }, onError: (e) {
@@ -78,47 +99,11 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         title: const Text('Update Error'),
         description: Text('Failed to update tournament data: $e'),
         autoCloseDuration: const Duration(seconds: 2),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
+        backgroundColor: _errorColor,
+        foregroundColor: _textColor,
         alignment: Alignment.bottomCenter,
       );
     });
-  }
-
-  Future<void> _fetchParticipantDetails() async {
-    try {
-      final List<Map<String, dynamic>> details = [];
-      for (var participant in _participants) {
-        final userId = participant['id'] as String;
-        final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
-        final userData = userDoc.data();
-        details.add({
-          'firstName': userData?['firstName']?.toString() ?? 'Unknown',
-          'lastName': userData?['lastName']?.toString() ?? '',
-          'phone': userData?['phone']?.toString() ?? 'Not provided',
-          'email': userData?['email']?.toString() ?? 'Not provided',
-          'gender': userData?['gender']?.toString() ?? 'Unknown',
-        });
-      }
-      if (mounted) {
-        setState(() {
-          _participantDetails = details;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        toastification.show(
-          context: context,
-          type: ToastificationType.error,
-          title: const Text('Error'),
-          description: const Text('Failed to load participant details.'),
-          autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
-          alignment: Alignment.bottomCenter,
-        );
-      }
-    }
   }
 
   @override
@@ -153,6 +138,182 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         }
       }
     }
+  }
+
+  Future<void> _uploadTournamentImage() async {
+    if (_isLoading) return;
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+      if (pickedFile == null) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
+      final file = File(pickedFile.path);
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('tournament_images/${widget.tournament.id}.jpg');
+      await storageRef.putFile(file);
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournament.id)
+          .update({'profileImage': downloadUrl});
+
+      if (mounted) {
+        setState(() {
+          widget.tournament.profileImage = downloadUrl;
+        });
+        toastification.show(
+          context: context,
+          type: ToastificationType.success,
+          title: const Text('Image Uploaded'),
+          description: const Text('Tournament image updated successfully!'),
+          autoCloseDuration: const Duration(seconds: 2),
+          backgroundColor: _successColor,
+          foregroundColor: _textColor,
+          alignment: Alignment.bottomCenter,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        toastification.show(
+          context: context,
+          type: ToastificationType.error,
+          title: const Text('Upload Failed'),
+          description: Text('Failed to upload image: $e'),
+          autoCloseDuration: const Duration(seconds: 2),
+          backgroundColor: _errorColor,
+          foregroundColor: _textColor,
+          alignment: Alignment.bottomCenter,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  void _showImageOptionsDialog(bool isCreator) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _cardBackground,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text(
+          'Image Options',
+          style: GoogleFonts.poppins(
+            color: _textColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.visibility, color: _accentColor),
+              title: Text(
+                'View Image',
+                style: GoogleFonts.poppins(
+                  color: _textColor,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showFullImageDialog();
+              },
+            ),
+            if (isCreator)
+              ListTile(
+                leading: Icon(Icons.edit, color: _accentColor),
+                title: Text(
+                  'Edit Image',
+                  style: GoogleFonts.poppins(
+                    color: _textColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _uploadTournamentImage();
+                },
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(
+                color: _secondaryText,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFullImageDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.7,
+                maxWidth: MediaQuery.of(context).size.width * 0.9,
+              ),
+              child: widget.tournament.profileImage != null &&
+                      widget.tournament.profileImage!.isNotEmpty
+                  ? Image.network(
+                      widget.tournament.profileImage!,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Image.asset(
+                        'assets/tournament_placholder.jpg',
+                        fit: BoxFit.contain,
+                      ),
+                    )
+                  : Image.asset(
+                      'assets/tournament_placholder.jpg',
+                      fit: BoxFit.contain,
+                    ),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Close',
+                style: GoogleFonts.poppins(
+                  color: _textColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _generateLeaderboardData() async {
@@ -329,31 +490,22 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
     });
 
     try {
-      // Create a map of existing matches by their IDs for quick lookup
       final existingMatches = {
-        for (var match in _matches) 
-          match['matchId'] as String: match
+        for (var match in _matches) match['matchId'] as String: match
       };
 
       final newMatches = <Map<String, dynamic>>[];
       final updatedParticipants = _participants.map((p) => {...p, 'score': 0}).toList();
 
-      // Use tournament startDate as base, fallback to current date
-      final baseStartDate = widget.tournament.startDate;
-      // Set matches to start at 9:00 AM on the startDate
-      DateTime matchStartTime = DateTime(
-        baseStartDate.year,
-        baseStartDate.month,
-        baseStartDate.day,
-        9, 
-        0,
-      );
+      DateTime matchStartDate = widget.tournament.startDate;
+      final startHour = widget.tournament.startTime.hour;
+      final startMinute = widget.tournament.startTime.minute;
 
       if (_isDoublesTournament()) {
         if (_teams.length < 2) {
           throw 'Need at least 2 teams to schedule matches.';
         }
-        
+
         switch (widget.tournament.gameType.toLowerCase()) {
           case 'knockout':
             final shuffledTeams = List<Map<String, dynamic>>.from(_teams)..shuffle();
@@ -366,19 +518,23 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
               final team2Names = team2['players']
                   .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
                   .toList();
-              
+
               final team1Ids = team1['players'].map((p) => p['id']).toList();
               final team2Ids = team2['players'].map((p) => p['id']).toList();
-              
-              // Generate a consistent match ID based on team composition
+
               final matchId = 'match_${team1Ids.join('_')}_vs_${team2Ids.join('_')}';
-              
-              // Check if this match already exists
+
+              final matchDateTime = DateTime(
+                matchStartDate.year,
+                matchStartDate.month,
+                matchStartDate.day,
+                startHour,
+                startMinute,
+              );
+
               if (existingMatches.containsKey(matchId)) {
-                // Preserve the existing match data
                 newMatches.add(existingMatches[matchId]!);
               } else {
-                // Create new match
                 newMatches.add({
                   'matchId': matchId,
                   'round': 1,
@@ -396,37 +552,54 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                     'isLive': false,
                     'currentServer': 'team1',
                   },
-                  'startTime': Timestamp.fromDate(matchStartTime),
+                  'startTime': Timestamp.fromDate(matchDateTime),
                 });
-                matchStartTime = matchStartTime.add(const Duration(hours: 1));
               }
+              matchStartDate = matchStartDate.add(const Duration(days: 1));
             }
             break;
-            
+
           case 'round-robin':
-            for (int i = 0; i < _teams.length; i++) {
-              for (int j = i + 1; j < _teams.length; j++) {
-                final team1 = _teams[i];
-                final team2 = _teams[j];
+            final competitors = List<Map<String, dynamic>>.from(_teams);
+            final numCompetitors = competitors.length;
+            final isOdd = numCompetitors.isOdd;
+            if (isOdd) {
+              competitors.add({
+                'teamId': 'bye',
+                'players': [{'id': 'bye', 'firstName': 'Bye', 'lastName': ''}]
+              });
+            }
+            final n = competitors.length;
+            final totalRounds = n - 1;
+            final matchesPerRound = n ~/ 2;
+
+            final rounds = <List<Map<String, dynamic>>>[];
+            for (var i = 0; i < totalRounds; i++) {
+              rounds.add([]);
+            }
+
+            for (var round = 0; round < totalRounds; round++) {
+              for (var i = 0; i < matchesPerRound; i++) {
+                final team1 = competitors[i];
+                final team2 = competitors[n - 1 - i];
+                if (team1['teamId'] == 'bye' || team2['teamId'] == 'bye') continue;
+
                 final team1Names = team1['players']
                     .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
                     .toList();
                 final team2Names = team2['players']
                     .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
                     .toList();
-                
+
                 final team1Ids = team1['players'].map((p) => p['id']).toList();
                 final team2Ids = team2['players'].map((p) => p['id']).toList();
-                
-                // Generate a consistent match ID
+
                 final matchId = 'match_${team1Ids.join('_')}_vs_${team2Ids.join('_')}';
-                
-                if (existingMatches.containsKey(matchId)) {
-                  newMatches.add(existingMatches[matchId]!);
-                } else {
-                  newMatches.add({
+
+                if (!existingMatches.containsKey(matchId)) {
+                  rounds[round].add({
                     'matchId': matchId,
-                    'round': 1,
+                    'round': round + 1,
                     'team1': team1Names,
                     'team2': team2Names,
                     'team1Ids': team1Ids,
@@ -441,14 +614,53 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                       'isLive': false,
                       'currentServer': 'team1',
                     },
-                    'startTime': Timestamp.fromDate(matchStartTime),
                   });
-                  matchStartTime = matchStartTime.add(const Duration(hours: 1));
                 }
+              }
+              final temp = competitors.sublist(1, n - 1);
+              competitors.setRange(1, n - 1, temp.sublist(1)..add(temp[0]));
+            }
+
+            final playerLastPlayDate = <String, DateTime>{};
+            for (var round in rounds) {
+              for (var match in round) {
+                final team1Ids = List<String>.from(match['team1Ids']);
+                final team2Ids = List<String>.from(match['team2Ids']);
+                final allPlayerIds = [...team1Ids, ...team2Ids];
+
+                DateTime candidateDate = matchStartDate;
+                bool conflict;
+                do {
+                  conflict = false;
+                  for (var playerId in allPlayerIds) {
+                    final lastPlayDate = playerLastPlayDate[playerId];
+                    if (lastPlayDate != null &&
+                        candidateDate.difference(lastPlayDate).inDays.abs() < 1) {
+                      conflict = true;
+                      candidateDate = candidateDate.add(const Duration(days: 1));
+                      break;
+                    }
+                  }
+                } while (conflict);
+
+                match['startTime'] = Timestamp.fromDate(DateTime(
+                  candidateDate.year,
+                  candidateDate.month,
+                  candidateDate.day,
+                  startHour,
+                  startMinute,
+                ));
+
+                for (var playerId in allPlayerIds) {
+                  playerLastPlayDate[playerId] = candidateDate;
+                }
+
+                newMatches.add(match);
+                matchStartDate = candidateDate.add(const Duration(days: 1));
               }
             }
             break;
-            
+
           default:
             throw 'Unsupported tournament type: ${widget.tournament.gameType}';
         }
@@ -456,17 +668,24 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         if (_participants.length < 2) {
           throw 'Need at least 2 participants to schedule matches.';
         }
-        
+
         switch (widget.tournament.gameType.toLowerCase()) {
           case 'knockout':
             final shuffledParticipants = List<Map<String, dynamic>>.from(_participants)..shuffle();
             for (int i = 0; i < shuffledParticipants.length - 1; i += 2) {
               final player1 = shuffledParticipants[i];
               final player2 = shuffledParticipants[i + 1];
-              
-              // Generate consistent match ID
+
               final matchId = 'match_${player1['id']}_vs_${player2['id']}';
-              
+
+              final matchDateTime = DateTime(
+                matchStartDate.year,
+                matchStartDate.month,
+                matchStartDate.day,
+                startHour,
+                startMinute,
+              );
+
               if (existingMatches.containsKey(matchId)) {
                 newMatches.add(existingMatches[matchId]!);
               } else {
@@ -487,27 +706,41 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                     'isLive': false,
                     'currentServer': 'player1',
                   },
-                  'startTime': Timestamp.fromDate(matchStartTime),
+                  'startTime': Timestamp.fromDate(matchDateTime),
                 });
-                matchStartTime = matchStartTime.add(const Duration(hours: 1));
               }
+              matchStartDate = matchStartDate.add(const Duration(days: 1));
             }
             break;
-            
+
           case 'round-robin':
-            for (int i = 0; i < _participants.length; i++) {
-              for (int j = i + 1; j < _participants.length; j++) {
-                final player1 = _participants[i];
-                final player2 = _participants[j];
-                
+            final competitors = List<Map<String, dynamic>>.from(_participants);
+            final numCompetitors = competitors.length;
+            final isOdd = numCompetitors.isOdd;
+            if (isOdd) {
+              competitors.add({'id': 'bye', 'gender': 'none', 'score': 0});
+            }
+            final n = competitors.length;
+            final totalRounds = n - 1;
+            final matchesPerRound = n ~/ 2;
+
+            final rounds = <List<Map<String, dynamic>>>[];
+            for (var i = 0; i < totalRounds; i++) {
+              rounds.add([]);
+            }
+
+            for (var round = 0; round < totalRounds; round++) {
+              for (var i = 0; i < matchesPerRound; i++) {
+                final player1 = competitors[i];
+                final player2 = competitors[n - 1 - i];
+                if (player1['id'] == 'bye' || player2['id'] == 'bye') continue;
+
                 final matchId = 'match_${player1['id']}_vs_${player2['id']}';
-                
-                if (existingMatches.containsKey(matchId)) {
-                  newMatches.add(existingMatches[matchId]!);
-                } else {
-                  newMatches.add({
+
+                if (!existingMatches.containsKey(matchId)) {
+                  rounds[round].add({
                     'matchId': matchId,
-                    'round': 1,
+                    'round': round + 1,
                     'player1': await _getDisplayName(player1['id']),
                     'player2': await _getDisplayName(player2['id']),
                     'player1Id': player1['id'],
@@ -522,14 +755,51 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                       'isLive': false,
                       'currentServer': 'player1',
                     },
-                    'startTime': Timestamp.fromDate(matchStartTime),
                   });
-                  matchStartTime = matchStartTime.add(const Duration(hours: 1));
                 }
+              }
+              final temp = competitors.sublist(1, n - 1);
+              competitors.setRange(1, n - 1, temp.sublist(1)..add(temp[0]));
+            }
+
+            final playerLastPlayDate = <String, DateTime>{};
+            for (var round in rounds) {
+              for (var match in round) {
+                final player1Id = match['player1Id'] as String;
+                final player2Id = match['player2Id'] as String;
+
+                DateTime candidateDate = matchStartDate;
+                bool conflict;
+                do {
+                  conflict = false;
+                  for (var playerId in [player1Id, player2Id]) {
+                    final lastPlayDate = playerLastPlayDate[playerId];
+                    if (lastPlayDate != null &&
+                        candidateDate.difference(lastPlayDate).inDays.abs() < 1) {
+                      conflict = true;
+                      candidateDate = candidateDate.add(const Duration(days: 1));
+                      break;
+                    }
+                  }
+                } while (conflict);
+
+                match['startTime'] = Timestamp.fromDate(DateTime(
+                  candidateDate.year,
+                  candidateDate.month,
+                  candidateDate.day,
+                  startHour,
+                  startMinute,
+                ));
+
+                playerLastPlayDate[player1Id] = candidateDate;
+                playerLastPlayDate[player2Id] = candidateDate;
+
+                newMatches.add(match);
+                matchStartDate = candidateDate.add(const Duration(days: 1));
               }
             }
             break;
-            
+
           default:
             throw 'Unsupported tournament type: ${widget.tournament.gameType}';
         }
@@ -552,8 +822,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           title: const Text('Matches Scheduled'),
           description: const Text('Match schedule has been successfully generated!'),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.green,
-          foregroundColor: Colors.white,
+          backgroundColor: _successColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
       }
@@ -565,8 +835,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           title: const Text('Error'),
           description: Text('Failed to generate matches: $e'),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
+          backgroundColor: _errorColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
       }
@@ -578,6 +848,397 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
       }
     }
   }
+
+  Future<void> _createManualMatch(
+    dynamic competitor1,
+    dynamic competitor2,
+    DateTime matchDateTime,
+  ) async {
+    if (_isLoading) return;
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final existingMatches = {
+        for (var match in _matches) match['matchId'] as String: match
+      };
+
+      final isDoubles = _isDoublesTournament();
+      String matchId;
+      Map<String, dynamic> newMatch;
+
+      if (isDoubles) {
+        final team1Ids = competitor1['players'].map((p) => p['id']).toList();
+        final team2Ids = competitor2['players'].map((p) => p['id']).toList();
+        matchId = 'match_${team1Ids.join('_')}_vs_${team2Ids.join('_')}';
+
+        if (existingMatches.containsKey(matchId)) {
+          throw 'Match between these teams already exists.';
+        }
+
+        final team1Names = competitor1['players']
+            .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
+            .toList();
+        final team2Names = competitor2['players']
+            .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
+            .toList();
+
+        newMatch = {
+          'matchId': matchId,
+          'round': _matches.isNotEmpty ? (_matches.last['round'] ?? 1) : 1,
+          'team1': team1Names,
+          'team2': team2Names,
+          'team1Ids': team1Ids,
+          'team2Ids': team2Ids,
+          'completed': false,
+          'winner': null,
+          'umpire': {'name': '', 'email': '', 'phone': ''},
+          'liveScores': {
+            'team1': [0, 0, 0],
+            'team2': [0, 0, 0],
+            'currentGame': 1,
+            'isLive': false,
+            'currentServer': 'team1',
+          },
+          'startTime': Timestamp.fromDate(matchDateTime),
+        };
+      } else {
+        matchId = 'match_${competitor1['id']}_vs_${competitor2['id']}';
+
+        if (existingMatches.containsKey(matchId)) {
+          throw 'Match between these players already exists.';
+        }
+
+        newMatch = {
+          'matchId': matchId,
+          'round': _matches.isNotEmpty ? (_matches.last['round'] ?? 1) : 1,
+          'player1': await _getDisplayName(competitor1['id']),
+          'player2': await _getDisplayName(competitor2['id']),
+          'player1Id': competitor1['id'],
+          'player2Id': competitor2['id'],
+          'completed': false,
+          'winner': null,
+          'umpire': {'name': '', 'email': '', 'phone': ''},
+          'liveScores': {
+            'player1': [0, 0, 0],
+            'player2': [0, 0, 0],
+            'currentGame': 1,
+            'isLive': false,
+            'currentServer': 'player1',
+          },
+          'startTime': Timestamp.fromDate(matchDateTime),
+        };
+      }
+
+      final updatedMatches = List<Map<String, dynamic>>.from(_matches)..add(newMatch);
+
+      await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournament.id)
+          .update({'matches': updatedMatches});
+
+      if (mounted) {
+        setState(() {
+          _matches = updatedMatches;
+        });
+        await _generateLeaderboardData();
+        toastification.show(
+          context: context,
+          type: ToastificationType.success,
+          title: const Text('Match Created'),
+          description: const Text('Manual match has been successfully created!'),
+          autoCloseDuration: const Duration(seconds: 2),
+          backgroundColor: _successColor,
+          foregroundColor: _textColor,
+          alignment: Alignment.bottomCenter,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        toastification.show(
+          context: context,
+          type: ToastificationType.error,
+          title: const Text('Error'),
+          description: Text('Failed to create match: $e'),
+          autoCloseDuration: const Duration(seconds: 2),
+          backgroundColor: _errorColor,
+          foregroundColor: _textColor,
+          alignment: Alignment.bottomCenter,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  void _showManualMatchDialog(bool isCreator) {
+  if (!isCreator) return;
+
+  final competitors = _isDoublesTournament() ? _teams : _participants;
+  if (competitors.length < 2) {
+    toastification.show(
+      context: context,
+      type: ToastificationType.error,
+      title: const Text('Insufficient Competitors'),
+      description: const Text('At least two teams or players are required to create a match.'),
+      autoCloseDuration: const Duration(seconds: 2),
+      backgroundColor: _errorColor,
+      foregroundColor: _textColor,
+      alignment: Alignment.bottomCenter,
+    );
+    return;
+  }
+
+  dynamic selectedCompetitor1;
+  dynamic selectedCompetitor2;
+  DateTime selectedDate = widget.tournament.startDate;
+  TimeOfDay selectedTime = widget.tournament.startTime;
+
+  showDialog(
+    context: context,
+    builder: (_) => StatefulBuilder(
+      builder: (context, setStateDialog) => AlertDialog(
+        backgroundColor: _cardBackground,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text(
+          'Create Manual Match',
+          style: GoogleFonts.poppins(
+            color: _textColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.85,
+              minWidth: 200.0, // Prevent overly narrow rendering
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: DropdownButtonFormField<dynamic>(
+                    decoration: InputDecoration(
+                      labelText: _isDoublesTournament() ? 'Select Team 1' : 'Select Player 1',
+                      labelStyle: GoogleFonts.poppins(color: _textColor.withOpacity(0.7)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: _accentColor),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: _accentColor.withOpacity(0.5)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: _accentColor, width: 2),
+                      ),
+                      filled: true,
+                      fillColor: _cardBackground.withOpacity(0.9),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    dropdownColor: _cardBackground,
+                    isExpanded: true, // Ensures dropdown uses available width
+                    items: competitors.map((competitor) {
+                      return DropdownMenuItem(
+                        value: competitor,
+                        child: FutureBuilder<String>(
+                          future: _isDoublesTournament()
+                              ? Future.value(
+                                  competitor['players']
+                                      .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
+                                      .join(' & '),
+                                )
+                              : _getDisplayName(competitor['id']),
+                          builder: (context, snapshot) {
+                            return Text(
+                              snapshot.connectionState == ConnectionState.waiting
+                                  ? 'Loading...'
+                                  : snapshot.data ?? competitor['id'],
+                              style: GoogleFonts.poppins(
+                                color: _textColor,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            );
+                          },
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setStateDialog(() {
+                        selectedCompetitor1 = value;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Flexible(
+                  child: DropdownButtonFormField<dynamic>(
+                    decoration: InputDecoration(
+                      labelText: _isDoublesTournament() ? 'Select Team 2' : 'Select Player 2',
+                      labelStyle: GoogleFonts.poppins(color: _textColor.withOpacity(0.7)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: _accentColor),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: _accentColor.withOpacity(0.5)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: _accentColor, width: 2),
+                      ),
+                      filled: true,
+                      fillColor: _cardBackground.withOpacity(0.9),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    dropdownColor: _cardBackground,
+                    isExpanded: true, // Ensures dropdown uses available width
+                    items: competitors.map((competitor) {
+                      return DropdownMenuItem(
+                        value: competitor,
+                        child: FutureBuilder<String>(
+                          future: _isDoublesTournament()
+                              ? Future.value(
+                                  competitor['players']
+                                      .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
+                                      .join(' & '),
+                                )
+                              : _getDisplayName(competitor['id']),
+                          builder: (context, snapshot) {
+                            return Text(
+                              snapshot.connectionState == ConnectionState.waiting
+                                  ? 'Loading...'
+                                  : snapshot.data ?? competitor['id'],
+                              style: GoogleFonts.poppins(
+                                color: _textColor,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            );
+                          },
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setStateDialog(() {
+                        selectedCompetitor2 = value;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  title: Text(
+                    'Match Date: ${DateFormat('MMM dd, yyyy').format(selectedDate)}',
+                    style: GoogleFonts.poppins(color: _textColor),
+                  ),
+                  trailing: Icon(Icons.calendar_today, color: _accentColor),
+                  onTap: () async {
+                    final pickedDate = await showDatePicker(
+                      context: context,
+                      initialDate: selectedDate,
+                      firstDate: widget.tournament.startDate,
+                      lastDate: widget.tournament.endDate ?? DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (pickedDate != null) {
+                      setStateDialog(() {
+                        selectedDate = pickedDate;
+                      });
+                    }
+                  },
+                ),
+                ListTile(
+                  title: Text(
+                    'Match Time: ${selectedTime.format(context)}',
+                    style: GoogleFonts.poppins(color: _textColor),
+                  ),
+                  trailing: Icon(Icons.access_time, color: _accentColor),
+                  onTap: () async {
+                    final pickedTime = await showTimePicker(
+                      context: context,
+                      initialTime: selectedTime,
+                    );
+                    if (pickedTime != null) {
+                      setStateDialog(() {
+                        selectedTime = pickedTime;
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(color: _secondaryText),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              if (selectedCompetitor1 == null || selectedCompetitor2 == null) {
+                toastification.show(
+                  context: context,
+                  type: ToastificationType.error,
+                  title: const Text('Selection Required'),
+                  description: const Text('Please select both competitors.'),
+                  autoCloseDuration: const Duration(seconds: 2),
+                  backgroundColor: _errorColor,
+                  foregroundColor: _textColor,
+                  alignment: Alignment.bottomCenter,
+                );
+                return;
+              }
+              if (selectedCompetitor1 == selectedCompetitor2) {
+                toastification.show(
+                  context: context,
+                  type: ToastificationType.error,
+                  title: const Text('Invalid Selection'),
+                  description: const Text('Cannot create a match with the same competitor.'),
+                  autoCloseDuration: const Duration(seconds: 2),
+                  backgroundColor: _errorColor,
+                  foregroundColor: _textColor,
+                  alignment: Alignment.bottomCenter,
+                );
+                return;
+              }
+              Navigator.pop(context);
+              final matchDateTime = DateTime(
+                selectedDate.year,
+                selectedDate.month,
+                selectedDate.day,
+                selectedTime.hour,
+                selectedTime.minute,
+              );
+              _createManualMatch(selectedCompetitor1, selectedCompetitor2, matchDateTime);
+            },
+            child: Text(
+              'Create',
+              style: GoogleFonts.poppins(
+                color: _successColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 
   Future<void> _deleteMatch(int matchIndex) async {
     if (_isLoading) return;
@@ -603,8 +1264,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           title: const Text('Match Deleted'),
           description: const Text('The match has been successfully deleted.'),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.green,
-          foregroundColor: Colors.white,
+          backgroundColor: _successColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
       }
@@ -616,8 +1277,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           title: const Text('Delete Failed'),
           description: Text('Failed to delete match: $e'),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
+          backgroundColor: _errorColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
       }
@@ -628,6 +1289,55 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         });
       }
     }
+  }
+
+  void _showDeleteConfirmation(BuildContext context, int matchIndex) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _cardBackground,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text(
+          'Confirm Delete',
+          style: GoogleFonts.poppins(
+            color: _textColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          'Are you sure you want to delete this match?',
+          style: GoogleFonts.poppins(
+            color: _secondaryText,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(
+                color: _secondaryText,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteMatch(matchIndex);
+            },
+            child: Text(
+              'Delete',
+              style: GoogleFonts.poppins(
+                color: _errorColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<String?> _getUserGender(String userId) async {
@@ -649,8 +1359,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         title: const Text('Authentication Required'),
         description: const Text('Please sign in to join the tournament.'),
         autoCloseDuration: const Duration(seconds: 2),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
+        backgroundColor: _errorColor,
+        foregroundColor: _textColor,
         alignment: Alignment.bottomCenter,
       );
       return;
@@ -664,8 +1374,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         title: const Text('Creator Cannot Join'),
         description: const Text('As the tournament creator, you cannot join as a participant.'),
         autoCloseDuration: const Duration(seconds: 2),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
+        backgroundColor: _errorColor,
+        foregroundColor: _textColor,
         alignment: Alignment.bottomCenter,
       );
       return;
@@ -678,8 +1388,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         title: const Text('Already Joined'),
         description: const Text('You have already joined this tournament!'),
         autoCloseDuration: const Duration(seconds: 2),
-        backgroundColor: Colors.orange,
-        foregroundColor: Colors.white,
+        backgroundColor: _warningColor,
+        foregroundColor: _textColor,
         alignment: Alignment.bottomCenter,
       );
       return;
@@ -694,8 +1404,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
         title: const Text('Gender Not Set'),
         description: const Text('Please set your gender in your profile to join a tournament.'),
         autoCloseDuration: const Duration(seconds: 2),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
+        backgroundColor: _errorColor,
+        foregroundColor: _textColor,
         alignment: Alignment.bottomCenter,
       );
       return;
@@ -710,8 +1420,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           'This tournament (${widget.tournament.gameFormat}) is restricted to ${StringExtension(requiredGender).capitalize()} participants only.',
         ),
         autoCloseDuration: const Duration(seconds: 2),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
+        backgroundColor: _errorColor,
+        foregroundColor: _textColor,
         alignment: Alignment.bottomCenter,
       );
       return;
@@ -736,8 +1446,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
             'Doubles tournaments require Male or Female participants for pairing.',
           ),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
+          backgroundColor: _errorColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
         return;
@@ -752,8 +1462,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
             'Doubles tournament requires equal Male and Female participants. Please wait for a Female participant to join.',
           ),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
+          backgroundColor: _errorColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
         return;
@@ -768,8 +1478,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
             'Doubles tournament requires equal Male and Female participants. Please wait for a Male participant to join.',
           ),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
+          backgroundColor: _errorColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
         return;
@@ -799,7 +1509,6 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           _hasJoined = true;
         });
         await _generateTeams();
-        await _fetchParticipantDetails();
         await _generateLeaderboardData();
         toastification.show(
           context: context,
@@ -807,8 +1516,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           title: const Text('Joined Tournament'),
           description: Text('Successfully joined ${widget.tournament.name}!'),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.green,
-          foregroundColor: Colors.white,
+          backgroundColor: _successColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
       }
@@ -820,8 +1529,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           title: const Text('Join Failed'),
           description: Text('Failed to join tournament: $e'),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
+          backgroundColor: _errorColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
       }
@@ -857,7 +1566,6 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           _hasJoined = false;
         });
         await _generateTeams();
-        await _fetchParticipantDetails();
         await _generateLeaderboardData();
         toastification.show(
           context: context,
@@ -865,8 +1573,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           title: const Text('Withdrawn'),
           description: Text('You have successfully withdrawn from ${widget.tournament.name}.'),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.green,
-          foregroundColor: Colors.white,
+          backgroundColor: _successColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
       }
@@ -878,8 +1586,8 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
           title: const Text('Withdrawal Failed'),
           description: Text('Failed to withdraw from tournament: $e'),
           autoCloseDuration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
+          backgroundColor: _errorColor,
+          foregroundColor: _textColor,
           alignment: Alignment.bottomCenter,
         );
       }
@@ -892,9 +1600,20 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
     }
   }
 
+  String _formatDateRange(DateTime startDate, DateTime? endDate) {
+    final start = DateFormat('MMM dd, yyyy').format(startDate);
+    if (endDate == null) return start;
+    if (startDate.year == endDate.year &&
+        startDate.month == endDate.month &&
+        startDate.day == endDate.day) {
+      return start;
+    }
+    return '$start - ${DateFormat('MMM dd, yyyy').format(endDate)}';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30)); // IST
+    final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
     final isClosed = widget.tournament.endDate != null && widget.tournament.endDate!.isBefore(now);
     final authState = context.read<AuthBloc>().state;
     final userId = authState is AuthAuthenticated ? authState.user.uid : null;
@@ -903,244 +1622,87 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
     final canWithdraw = now.isBefore(withdrawDeadline) && !isClosed;
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF0A1325), Color(0xFF1A2A44)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: SafeArea(
-          child: CustomScrollView(
-            slivers: [
-              SliverAppBar(
-                backgroundColor: Colors.transparent,
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white70),
-                  onPressed: () => Navigator.pop(context),
-                ),
+      backgroundColor: _primaryColor,
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) {
+          return [
+            SliverAppBar(
+              expandedHeight: 200.0,
+              floating: false,
+              pinned: true,
+              flexibleSpace: FlexibleSpaceBar(
                 title: Text(
                   widget.tournament.name,
                   style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: 20,
+                    color: _textColor,
                     fontWeight: FontWeight.w600,
+                    fontSize: 18,
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  child: AnimationConfiguration.synchronized(
-                    duration: const Duration(milliseconds: 1000),
-                    child: Column(
-                      children: AnimationConfiguration.toStaggeredList(
-                        duration: const Duration(milliseconds: 500),
-                        childAnimationBuilder: (child) => SlideAnimation(
-                          verticalOffset: 50.0,
-                          child: FadeInAnimation(child: child),
-                        ),
-                        children: [
-                          _buildHeaderCard(isCreator),
-                          Center(
-                            child: Column(
-                              children: [
-                                const SizedBox(height: 20),
-                                if (!isCreator && !_hasJoined)
-                                  _buildModernButton(
-                                    text: isClosed ? 'Tournament Closed' : 'Join Now',
-                                    gradient: LinearGradient(
-                                      colors: isClosed
-                                          ? [Colors.grey.shade700, Colors.grey.shade600]
-                                          : [Colors.cyanAccent, Colors.blueAccent],
-                                    ),
-                                    isLoading: _isLoading,
-                                    onPressed: isClosed ? null : () => _joinTournament(context),
-                                  ),
-                                if (!isCreator && _hasJoined)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 16),
-                                    child: Column(
-                                      children: [
-                                        _buildModernButton(
-                                          text: 'Withdraw',
-                                          gradient: LinearGradient(
-                                            colors: canWithdraw
-                                                ? [Colors.redAccent, Colors.red]
-                                                : [Colors.grey.shade700, Colors.grey.shade600],
-                                          ),
-                                          isLoading: _isLoading,
-                                          onPressed: canWithdraw ? () => _withdrawFromTournament(context) : null,
-                                          isDisabled: !canWithdraw,
-                                          disabledTooltip:
-                                              'Withdraw deadline passed on ${DateFormat('MMM dd').format(withdrawDeadline)}',
-                                        ),
-                                        if (!canWithdraw)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 8),
-                                            child: Text(
-                                              'Withdraw deadline passed on ${DateFormat('MMM dd').format(withdrawDeadline)}',
-                                              style: GoogleFonts.poppins(
-                                                fontSize: 12,
-                                                color: Colors.white70,
-                                              ),
-                                            ),
-                                          ),
-                                        Padding(
-                                          padding: const EdgeInsets.only(top: 4),
-                                          child: Text(
-                                            'Can withdraw until ${DateFormat('MMM dd').format(withdrawDeadline)}',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 12,
-                                              color: Colors.white70,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                const SizedBox(height: 30),
-                              ],
+                background: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    widget.tournament.profileImage != null && widget.tournament.profileImage!.isNotEmpty
+                        ? Image.network(
+                            widget.tournament.profileImage!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => Image.asset(
+                              'assets/tournament_placholder.jpg',
+                              fit: BoxFit.cover,
                             ),
+                          )
+                        : Image.asset(
+                            'assets/tournament_placholder.jpg',
+                            fit: BoxFit.cover,
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              if (_hasJoined || isCreator)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        Divider(
-                          color: Colors.white.withOpacity(0.2),
-                          thickness: 1.5,
-                        ),
-                        const SizedBox(height: 20),
-                        if (isCreator)
-                          _buildModernButton(
-                            text: 'Generate Match Schedule',
-                            gradient: LinearGradient(
-                              colors: isClosed
-                                  ? [Colors.grey.shade700, Colors.grey.shade600]
-                                  : [Colors.cyanAccent, Colors.blueAccent],
-                            ),
-                            isLoading: _isLoading,
-                            onPressed: isClosed ? null : _generateMatches,
-                          ),
-                        const SizedBox(height: 20),
-                        TabBar(
-                          controller: _tabController,
-                          tabs: [
-                            Tab(
-                              child: Text(
-                                'Matches',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ),
-                            Tab(
-                              child: Text(
-                                'Leaderboard',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ),
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            _secondaryColor.withOpacity(0.7),
+                            _primaryColor.withOpacity(0.7),
                           ],
-                          indicatorColor: Colors.cyanAccent,
-                          indicatorWeight: 3,
-                          labelPadding: const EdgeInsets.symmetric(horizontal: 20),
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
                         ),
-                        const SizedBox(height: 20),
-                      ],
-                    ),
-                  ),
-                ),
-              if (_hasJoined || isCreator)
-                SliverToBoxAdapter(
-                  child: SizedBox(
-                    height: MediaQuery.of(context).size.height * 0.6,
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildMatchesTab(isCreator),
-                        _buildLeaderboardTab(),
-                      ],
-                    ),
-                  ),
-                ),
-              const SliverToBoxAdapter(child: SizedBox(height: 30)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModernButton({
-    required String text,
-    required LinearGradient gradient,
-    required bool isLoading,
-    VoidCallback? onPressed,
-    bool isDisabled = false,
-    String? disabledTooltip,
-  }) {
-    return AnimationConfiguration.staggeredList(
-      position: 0,
-      duration: const Duration(milliseconds: 500),
-      child: SlideAnimation(
-        verticalOffset: 50.0,
-        child: FadeInAnimation(
-          child: Tooltip(
-            message: isDisabled ? disabledTooltip ?? 'Action disabled' : '',
-            child: GestureDetector(
-              onTap: isLoading || onPressed == null || isDisabled ? null : onPressed,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                decoration: BoxDecoration(
-                  gradient: isDisabled
-                      ? LinearGradient(colors: [Colors.grey.shade700, Colors.grey.shade600])
-                      : gradient,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                      offset: const Offset(0, 4),
+                      ),
                     ),
                   ],
                 ),
-                child: isLoading
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : Text(
-                        text,
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: isDisabled ? Colors.grey.shade400 : Colors.white,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
               ),
+              backgroundColor: _secondaryColor,
+              elevation: 10,
+            ),
+          ];
+        },
+        body: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                const SizedBox(height: 16),
+                _buildTournamentOverviewCard(isCreator, isClosed),
+                const SizedBox(height: 20),
+                if (!isCreator && !_hasJoined && !isClosed)
+                  _buildActionButton(
+                    text: 'REGISTER NOW',
+                    onPressed: _isLoading ? null : () => _joinTournament(context),
+                  ),
+                if (!isCreator && _hasJoined)
+                  _buildWithdrawSection(canWithdraw, withdrawDeadline, context),
+                const SizedBox(height: 20),
+                _buildTournamentDetailsSection(),
+                if (_hasJoined || isCreator) ...[
+                  const SizedBox(height: 20),
+                  if (isCreator)
+                    _buildActionButton(
+                      text: 'GENERATE MATCH SCHEDULE',
+                      onPressed: isClosed || _isLoading ? null : _generateMatches,
+                    ),
+                  const SizedBox(height: 20),
+                  _buildTournamentTabs(isCreator),
+                ],
+              ],
             ),
           ),
         ),
@@ -1148,42 +1710,50 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
     );
   }
 
-  Widget _buildHeaderCard(bool isCreator) {
-    return AnimationConfiguration.staggeredList(
-      position: 0,
-      duration: const Duration(milliseconds: 500),
-      child: SlideAnimation(
-        verticalOffset: 50.0,
-        child: FadeInAnimation(
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 15,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-              border: Border.all(color: Colors.cyanAccent.withOpacity(0.2)),
-            ),
-            child: Row(
+  Widget _buildTournamentOverviewCard(bool isCreator, bool isClosed) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      color: _cardBackground,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    color: Colors.cyanAccent.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
-                  ),
-                  child: const Icon(
-                    Icons.sports_tennis,
-                    color: Colors.cyanAccent,
-                    size: 36,
+                GestureDetector(
+                  onTap: () => _showImageOptionsDialog(isCreator),
+                  child: Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: _accentColor.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _accentColor,
+                        width: 2,
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: widget.tournament.profileImage != null &&
+                              widget.tournament.profileImage!.isNotEmpty
+                          ? Image.network(
+                              widget.tournament.profileImage!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Image.asset(
+                                'assets/tournament_placholder.jpg',
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : Image.asset(
+                              'assets/tournament_placholder.jpg',
+                              fit: BoxFit.cover,
+                            ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -1198,11 +1768,11 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                             child: Text(
                               widget.tournament.name.isNotEmpty ? widget.tournament.name : 'Unnamed',
                               style: GoogleFonts.poppins(
-                                fontSize: 22,
+                                fontSize: 20,
                                 fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                                letterSpacing: 0.5,
+                                color: _textColor,
                               ),
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -1210,364 +1780,878 @@ class _TournamentDetailsPageState extends State<TournamentDetailsPage>
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [Colors.cyanAccent, Colors.blueAccent],
-                                ),
+                                color: _accentColor,
                                 borderRadius: BorderRadius.circular(10),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.cyanAccent.withOpacity(0.3),
-                                    blurRadius: 5,
-                                    spreadRadius: 1,
-                                  ),
-                                ],
                               ),
                               child: Text(
                                 'Created by You',
                                 style: GoogleFonts.poppins(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.black87,
+                                  color: _textColor,
                                 ),
                               ),
                             ),
-                          IconButton(
-                            icon: const Icon(Icons.info_outline, color: Colors.white70, size: 25),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => TournamentInfoPage(
-                                    tournament: widget.tournament,
-                                    creatorName: widget.creatorName,
-                                    participantDetails: _participantDetails,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        widget.tournament.gameFormat,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.cyanAccent,
-                        ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text(
+                            widget.tournament.gameFormat.toUpperCase(),
+                            style: GoogleFonts.poppins(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: _accentColor,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isClosed ? _errorColor.withOpacity(0.7) : _successColor.withOpacity(0.7),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              isClosed ? 'Closed' : 'Open',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: _textColor,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 16),
+            _buildDetailItem(
+              icon: Icons.calendar_month,
+              title: 'TOURNAMENT DATES',
+              value: _formatDateRange(widget.tournament.startDate, widget.tournament.endDate),
+            ),
+            _buildDetailItem(
+              icon: Icons.location_pin,
+              title: 'VENUE',
+              value: (widget.tournament.venue.isNotEmpty && widget.tournament.city.isNotEmpty)
+                  ? '${widget.tournament.venue}, ${widget.tournament.city}'
+                  : 'No Location',
+            ),
+            _buildDetailItem(
+              icon: Icons.people,
+              title: 'PARTICIPANTS',
+              value: '${_participants.length}/${widget.tournament.maxParticipants} registered',
+            ),
+            _buildDetailItem(
+              icon: Icons.account_balance_wallet,
+              title: 'ENTRY FEE',
+              value: widget.tournament.entryFee == 0 ? 'FREE ENTRY' : '₹${widget.tournament.entryFee.toStringAsFixed(0)}',
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildMatchesTab(bool isCreator) {
-    return ListView.builder(
-      key: _matchesListKey,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      itemCount: _matches.isEmpty ? 1 : _matches.length,
-      itemBuilder: (context, index) {
-        if (_matches.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.all(20),
-            child: Text(
-              isCreator
-                  ? 'No matches scheduled yet. Use the button above to generate the match schedule.'
-                  : 'No matches scheduled yet. Waiting for the tournament creator to set up the schedule.',
-              style: GoogleFonts.poppins(
-                color: Colors.white70,
-                fontSize: 16,
-                height: 1.5,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          );
-        }
-
-        final match = _matches[index];
-        final isDoubles = _isDoublesTournament();
-        final isCompleted = match['completed'] == true;
-        final isLive = match['liveScores']?['isLive'] == true;
-        final currentGame = match['liveScores']?['currentGame'] ?? 1;
-        final team1Score = isDoubles
-            ? (match['liveScores']?['team1'] as List<dynamic>?)?.isNotEmpty == true
-                ? match['liveScores']['team1'][currentGame - 1] ?? 0
-                : 0
-            : (match['liveScores']?['player1'] as List<dynamic>?)?.isNotEmpty == true
-                ? match['liveScores']['player1'][currentGame - 1] ?? 0
-                : 0;
-        final team2Score = isDoubles
-            ? (match['liveScores']?['team2'] as List<dynamic>?)?.isNotEmpty == true
-                ? match['liveScores']['team2'][currentGame - 1] ?? 0
-                : 0
-            : (match['liveScores']?['player2'] as List<dynamic>?)?.isNotEmpty == true
-                ? match['liveScores']['player2'][currentGame - 1] ?? 0
-                : 0;
-
-        return AnimationConfiguration.staggeredList(
-          position: index,
-          duration: const Duration(milliseconds: 200),
-          child: SlideAnimation(
-            verticalOffset: 10.0,
-            child: FadeInAnimation(
-              child: GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => MatchDetailsPage(
-                        tournamentId: widget.tournament.id,
-                        match: match,
-                        matchIndex: index,
-                        isCreator: isCreator,
-                        isDoubles: isDoubles,
-                        isUmpire: _isUmpire,
-                        onDeleteMatch: () => _deleteMatch(index),
-                      ),
-                    ),
-                  );
-                },
-                child: Container(
-                  margin: const EdgeInsets.symmetric(vertical: 8),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.cyanAccent.withOpacity(0.2)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 8,
-                        spreadRadius: 1,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            isDoubles
-                                ? 'Team Match: Round ${match['round'] ?? 1}'
-                                : 'Singles Match: Round ${match['round'] ?? 1}',
-                            style: GoogleFonts.poppins(
-                              color: Colors.cyanAccent,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          if (isCreator && !isLive && !isCompleted)
-                            IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.redAccent),
-                              onPressed: () => _showDeleteConfirmation(context, index),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        isDoubles
-                            ? 'Team 1: ${(match['team1'] as List<dynamic>).join(', ')} vs Team 2: ${(match['team2'] as List<dynamic>).join(', ')}'
-                            : '${match['player1']} vs ${match['player2']}',
-                        style: GoogleFonts.poppins(
-                          color: Colors.white70,
-                          fontSize: 14,
-                          height: 1.5,
-                        ),
-                      ),
-                      if (isCompleted)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Winner: ${match['winner'] == (isDoubles ? 'team1' : 'player1') ? (isDoubles ? match['team1'].join(', ') : match['player1']) : (isDoubles ? match['team2'].join(', ') : match['player2'])}',
-                            style: GoogleFonts.poppins(
-                              color: Colors.greenAccent,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      if (isLive)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Live: Game $currentGame - $team1Score : $team2Score',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      if (match['startTime'] != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Scheduled: ${DateFormat('MMM dd, yyyy hh:mm a').format((match['startTime'] as Timestamp).toDate())}',
-                            style: GoogleFonts.poppins(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                    ],
+  Widget _buildDetailItem({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: _accentColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: _secondaryText,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
                   ),
                 ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildLeaderboardTab() {
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      itemCount: _leaderboardData.isEmpty ? 1 : _leaderboardData.length,
-      itemBuilder: (context, index) {
-        if (_leaderboardData.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.all(20),
-            child: Text(
-              'No leaderboard data available.',
-              style: GoogleFonts.poppins(
-                color: Colors.white70,
-                fontSize: 16,
-                height: 1.5,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          );
-        }
-
-        final entry = _leaderboardData.entries.toList()[index];
-        final data = entry.value;
-        final displayName = data['name'] as String;
-        final score = data['score'] as int;
-
-        return AnimationConfiguration.staggeredList(
-          position: index,
-          duration: const Duration(milliseconds: 200),
-          child: SlideAnimation(
-            verticalOffset: 10.0,
-            child: FadeInAnimation(
-              child: Container(
-                margin: const EdgeInsets.symmetric(vertical: 6),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: index < 3
-                      ? Colors.cyanAccent.withOpacity(index == 0 ? 0.15 : index == 1 ? 0.1 : 0.05)
-                      : Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: index < 3 ? Colors.cyanAccent.withOpacity(0.5) : Colors.cyanAccent.withOpacity(0.2),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    color: _textColor,
+                    fontWeight: FontWeight.w600,
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 5,
-                      spreadRadius: 1,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: index < 3 ? Colors.cyanAccent.withOpacity(0.3) : Colors.white.withOpacity(0.1),
-                        border: Border.all(
-                          color: index < 3 ? Colors.cyanAccent : Colors.white.withOpacity(0.3),
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          '${index + 1}',
-                          style: GoogleFonts.poppins(
-                            color: index < 3 ? Colors.cyanAccent : Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Text(
-                        displayName,
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      '$score pts',
-                      style: GoogleFonts.poppins(
-                        color: Colors.cyanAccent,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              ],
             ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showDeleteConfirmation(BuildContext context, int index) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1B263B),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Confirm Deletion',
-          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        content: Text(
-          'Are you sure you want to delete this match? This action cannot be undone.',
-          style: GoogleFonts.poppins(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.poppins(color: Colors.white70)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _deleteMatch(index);
-            },
-            child: Text('Delete', style: GoogleFonts.poppins(color: Colors.redAccent)),
           ),
         ],
       ),
     );
   }
-}
 
-extension StringExtension on String {
-  String capitalize() {
-    if (isEmpty) return this;
-    return '${this[0].toUpperCase()}${substring(1).toLowerCase()}';
+  Widget _buildActionButton({
+    required String text,
+    required VoidCallback? onPressed,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _accentColor,
+          foregroundColor: _textColor,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          elevation: 4,
+        ),
+        onPressed: _isLoading ? null : onPressed,
+        label: _isLoading
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+            : Text(
+                text,
+                style: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5,
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildWithdrawSection(bool canWithdraw, DateTime withdrawDeadline, BuildContext context) {
+    return Column(
+      children: [
+        _buildActionButton(
+          text: 'WITHDRAW REGISTRATION',
+          onPressed: canWithdraw && !_isLoading ? () => _withdrawFromTournament(context) : null,
+        ),
+        if (!canWithdraw)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Withdrawal deadline: ${DateFormat('MMM dd, yyyy').format(withdrawDeadline)}',
+              style: GoogleFonts.poppins(
+                fontSize: 12,
+                color: _secondaryText,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTournamentDetailsSection() {
+    const String defaultBadmintonRules = '''
+1. Matches follow BWF regulations - best of 3 games to 21 points (rally point scoring)
+2. Players must report 15 minutes before scheduled match time
+3. Proper sports attire and non-marking shoes required
+4. Tournament director reserves the right to modify rules as needed
+5. Any disputes will be resolved by the tournament committee
+''';
+
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      color: _cardBackground,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'TOURNAMENT DETAILS',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: _accentColor,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _buildDetailItem(
+              icon: Icons.sports,
+              title: 'COMPETITION FORMAT',
+              value: widget.tournament.gameFormat,
+            ),
+            _buildDetailItem(
+              icon: Icons.tour,
+              title: 'TOURNAMENT TYPE',
+              value: widget.tournament.gameType,
+            ),
+            _buildDetailItem(
+              icon: Icons.person,
+              title: 'ORGANIZER',
+              value: widget.creatorName,
+            ),
+            const SizedBox(height: 16),
+            Divider(
+              color: _secondaryColor,
+              thickness: 1,
+              height: 1,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'TOURNAMENT RULES',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: _accentColor,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              (widget.tournament.rules != null && widget.tournament.rules!.isNotEmpty)
+                  ? widget.tournament.rules!
+                  : defaultBadmintonRules,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: _secondaryText,
+                height: 1.6,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTournamentTabs(bool isCreator) {
+    return Column(
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: _secondaryColor.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: TabBar(
+            controller: _tabController,
+            indicator: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: _accentColor,
+            ),
+            labelColor: _textColor,
+            unselectedLabelColor: _secondaryText,
+            labelStyle: GoogleFonts.poppins(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              letterSpacing: 0.5,
+            ),
+            unselectedLabelStyle: GoogleFonts.poppins(
+              fontWeight: FontWeight.w500,
+              fontSize: 14,
+            ),
+            tabs: const [
+              Tab(child: Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: Text('Matches'))),
+              Tab(child: Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: Text('Players'))),
+              Tab(child: Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: Text('Standings'))),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: MediaQuery.of(context).size.height * 0.5,
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _buildMatchesTab(isCreator),
+              _buildPlayersTab(),
+              _buildLeaderboardTab(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMatchesTab(bool isCreator) {
+    final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+    final isClosed = widget.tournament.endDate != null && widget.tournament.endDate!.isBefore(now);
+
+    return Column(
+      children: [
+        if (isCreator && !isClosed)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: _buildActionButton(
+              text: 'CREATE MANUAL MATCH',
+              onPressed: _isLoading ? null : () => _showManualMatchDialog(isCreator),
+            ),
+          ),
+        Expanded(
+          child: _matches.isEmpty
+              ? _buildEmptyState(
+                  icon: Icons.schedule,
+                  title: 'No Matches Scheduled',
+                  description: isCreator
+                      ? 'Generate or create matches to begin the tournament'
+                      : 'Waiting for organizer to schedule matches',
+                )
+              : ListView.builder(
+                  key: _matchesListKey,
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: _matches.length,
+                  itemBuilder: (context, index) {
+                    final match = _matches[index];
+                    final isDoubles = _isDoublesTournament();
+                    final isCompleted = match['completed'] == true;
+                    final isLive = match['liveScores']?['isLive'] == true;
+                    final currentGame = match['liveScores']?['currentGame'] ?? 1;
+
+                    final team1Score = isDoubles
+                        ? (match['liveScores']?['team1'] as List<dynamic>?)?.isNotEmpty == true
+                            ? match['liveScores']['team1'][currentGame - 1] ?? 0
+                            : 0
+                        : (match['liveScores']?['player1'] as List<dynamic>?)?.isNotEmpty == true
+                            ? match['liveScores']['player1'][currentGame - 1] ?? 0
+                            : 0;
+                    final team2Score = isDoubles
+                        ? (match['liveScores']?['team2'] as List<dynamic>?)?.isNotEmpty == true
+                            ? match['liveScores']['team2'][currentGame - 1] ?? 0
+                            : 0
+                        : (match['liveScores']?['player2'] as List<dynamic>?)?.isNotEmpty == true
+                            ? match['liveScores']['player2'][currentGame - 1] ?? 0
+                            : 0;
+
+                    return AnimationConfiguration.staggeredList(
+                      position: index,
+                      duration: const Duration(milliseconds: 400),
+                      child: SlideAnimation(
+                        verticalOffset: 30.0,
+                        child: FadeInAnimation(
+                          child: GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => MatchDetailsPage(
+                                    tournamentId: widget.tournament.id,
+                                    match: match,
+                                    matchIndex: index,
+                                    isCreator: isCreator,
+                                    isDoubles: isDoubles,
+                                    isUmpire: _isUmpire,
+                                    onDeleteMatch: () => _deleteMatch(index),
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              decoration: BoxDecoration(
+                                color: _cardBackground,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.1),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: _secondaryColor.withOpacity(0.3),
+                                      borderRadius: const BorderRadius.only(
+                                        topLeft: Radius.circular(12),
+                                        topRight: Radius.circular(12),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 36,
+                                          height: 36,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: _accentColor.withOpacity(0.2),
+                                            border: Border.all(color: _accentColor),
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              '${index + 1}',
+                                              style: GoogleFonts.poppins(
+                                                color: _accentColor,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Text(
+                                            '${isDoubles ? 'DOUBLES' : 'SINGLES'} • ROUND ${match['round'] ?? 1}',
+                                            style: GoogleFonts.poppins(
+                                              color: _accentColor,
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                        if (isCreator && !isLive && !isCompleted)
+                                          IconButton(
+                                            icon: Icon(Icons.delete, color: _errorColor),
+                                            onPressed: () => _showDeleteConfirmation(context, index),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      children: [
+                                        _buildMatchParticipant(
+                                          name: isDoubles
+                                              ? (match['team1'] as List<dynamic>).join(' & ')
+                                              : match['player1'],
+                                          isWinner: isCompleted && match['winner'] == (isDoubles ? 'team1' : 'player1'),
+                                          score: team1Score,
+                                          isLive: isLive,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          'VS',
+                                          style: GoogleFonts.poppins(
+                                            color: _secondaryText,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        _buildMatchParticipant(
+                                          name: isDoubles
+                                              ? (match['team2'] as List<dynamic>).join(' & ')
+                                              : match['player2'],
+                                          isWinner: isCompleted && match['winner'] == (isDoubles ? 'team2' : 'player2'),
+                                          score: team2Score,
+                                          isLive: isLive,
+                                        ),
+                                        if (match['startTime'] != null) ...[
+                                          const SizedBox(height: 12),
+                                          Divider(
+                                            color: _secondaryColor,
+                                            height: 1,
+                                            thickness: 1,
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Row(
+                                            children: [
+                                              Icon(Icons.access_time, size: 16, color: _secondaryText),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                DateFormat('MMM dd, hh:mm a').format(
+                                                  (match['startTime'] as Timestamp).toDate(),
+                                                ),
+                                                style: GoogleFonts.poppins(
+                                                  color: _secondaryText,
+                                                                                                  fontSize: 12,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (isCompleted || isLive)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 12),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: isLive ? _warningColor.withOpacity(0.7) : _successColor.withOpacity(0.7),
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Text(
+                                                isLive ? 'LIVE' : 'COMPLETED',
+                                                style: GoogleFonts.poppins(
+                                                  color: _textColor,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                 ] ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMatchParticipant({
+    required String name,
+    required bool isWinner,
+    required int score,
+    required bool isLive,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Expanded(
+          child: Text(
+            name,
+            style: GoogleFonts.poppins(
+              color: isWinner ? _successColor : _textColor,
+              fontWeight: isWinner ? FontWeight.bold : FontWeight.w500,
+              fontSize: 14,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (isLive || score > 0)
+          Text(
+            score.toString(),
+            style: GoogleFonts.poppins(
+              color: isWinner ? _successColor : _textColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildPlayersTab() {
+    return _isDoublesTournament()
+        ? _buildTeamsList()
+        : _buildParticipantsList();
+  }
+
+  Widget _buildParticipantsList() {
+    return _participants.isEmpty
+        ? _buildEmptyState(
+            icon: Icons.people,
+            title: 'No Participants',
+            description: 'No players have joined this tournament yet.',
+          )
+        : ListView.builder(
+            physics: const BouncingScrollPhysics(),
+            itemCount: _participants.length,
+            itemBuilder: (context, index) {
+              final participant = _participants[index];
+              return AnimationConfiguration.staggeredList(
+                position: index,
+                duration: const Duration(milliseconds: 400),
+                child: SlideAnimation(
+                  verticalOffset: 30.0,
+                  child: FadeInAnimation(
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _cardBackground,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _accentColor.withOpacity(0.2),
+                              border: Border.all(color: _accentColor),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${index + 1}',
+                                style: GoogleFonts.poppins(
+                                  color: _accentColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FutureBuilder<String>(
+                              future: _getDisplayName(participant['id']),
+                              builder: (context, snapshot) {
+                                return Text(
+                                  snapshot.data ?? participant['id'],
+                                  style: GoogleFonts.poppins(
+                                    color: _textColor,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 14,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                );
+                              },
+                            ),
+                          ),
+                          Text(
+                           StringExtension(participant['gender']?.toString() ?? '').capitalize(),
+                            style: GoogleFonts.poppins(
+                              color: _secondaryText,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+  }
+
+  Widget _buildTeamsList() {
+    return _teams.isEmpty
+        ? _buildEmptyState(
+            icon: Icons.group,
+            title: 'No Teams',
+            description: 'No teams have been formed yet.',
+          )
+        : ListView.builder(
+            physics: const BouncingScrollPhysics(),
+            itemCount: _teams.length,
+            itemBuilder: (context, index) {
+              final team = _teams[index];
+              final playerNames = team['players']
+                  .map((p) => '${p['firstName']} ${p['lastName']}'.trim())
+                  .join(' & ');
+              return AnimationConfiguration.staggeredList(
+                position: index,
+                duration: const Duration(milliseconds: 400),
+                child: SlideAnimation(
+                  verticalOffset: 30.0,
+                  child: FadeInAnimation(
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _cardBackground,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _accentColor.withOpacity(0.2),
+                              border: Border.all(color: _accentColor),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${index + 1}',
+                                style: GoogleFonts.poppins(
+                                  color: _accentColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              playerNames,
+                              style: GoogleFonts.poppins(
+                                color: _textColor,
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+  }
+
+  Widget _buildLeaderboardTab() {
+    return _leaderboardData.isEmpty
+        ? _buildEmptyState(
+            icon: Icons.leaderboard,
+            title: 'No Standings Available',
+            description: 'Play some matches to see the leaderboard!',
+          )
+        : ListView.builder(
+            physics: const BouncingScrollPhysics(),
+            itemCount: _leaderboardData.length,
+            itemBuilder: (context, index) {
+              final entry = _leaderboardData.entries.elementAt(index);
+              final name = entry.value['name'];
+              final score = entry.value['score'] as int;
+              return AnimationConfiguration.staggeredList(
+                position: index,
+                duration: const Duration(milliseconds: 400),
+                child: SlideAnimation(
+                  verticalOffset: 30.0,
+                  child: FadeInAnimation(
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _cardBackground,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: index == 0
+                                  ? _goldColor.withOpacity(0.2)
+                                  : index == 1
+                                      ? _silverColor.withOpacity(0.2)
+                                      : index == 2
+                                          ? _bronzeColor.withOpacity(0.2)
+                                          : _accentColor.withOpacity(0.2),
+                              border: Border.all(
+                                color: index == 0
+                                    ? _goldColor
+                                    : index == 1
+                                        ? _silverColor
+                                        : index == 2
+                                            ? _bronzeColor
+                                            : _accentColor,
+                              ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${index + 1}',
+                                style: GoogleFonts.poppins(
+                                  color: index == 0
+                                      ? _goldColor
+                                      : index == 1
+                                          ? _silverColor
+                                          : index == 2
+                                              ? _bronzeColor
+                                              : _accentColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              name,
+                              style: GoogleFonts.poppins(
+                                color: _textColor,
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            'Score: $score',
+                            style: GoogleFonts.poppins(
+                              color: _textColor,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+  }
+
+  Widget _buildEmptyState({
+    required IconData icon,
+    required String title,
+    required String description,
+  }) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            size: 60,
+            color: _secondaryText,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: GoogleFonts.poppins(
+              color: _textColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            description,
+            style: GoogleFonts.poppins(
+              color: _secondaryText,
+              fontWeight: FontWeight.w400,
+              fontSize: 14,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
   }
 }

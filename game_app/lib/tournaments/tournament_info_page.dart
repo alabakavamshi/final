@@ -205,7 +205,7 @@ class TournamentInfoPage extends StatelessWidget {
                         title: 'Rules',
                         children: [
                           Text(
-                            tournament.rules.isNotEmpty ? tournament.rules : _defaultBadmintonRules,
+                            tournament.rules ?? _defaultBadmintonRules,
                             style: GoogleFonts.poppins(
                               fontSize: 14,
                               color: Colors.white70,

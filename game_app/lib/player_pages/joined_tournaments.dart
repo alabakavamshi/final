@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:game_app/models/tournament.dart';
+import 'package:game_app/tournaments/tournament_details_page.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:toastification/toastification.dart';
@@ -12,7 +13,6 @@ class JoinedTournamentsPage extends StatelessWidget {
 
   Future<void> _withdrawFromTournament(BuildContext context, Tournament tournament) async {
     try {
-      // Fetch the current tournament document to get the participant entry
       final tournamentDoc = await FirebaseFirestore.instance
           .collection('tournaments')
           .doc(tournament.id)
@@ -26,7 +26,6 @@ class JoinedTournamentsPage extends StatelessWidget {
         orElse: () => throw Exception('Participant not found'),
       );
 
-      // Remove the participant entry using arrayRemove
       await FirebaseFirestore.instance
           .collection('tournaments')
           .doc(tournament.id)
@@ -34,37 +33,148 @@ class JoinedTournamentsPage extends StatelessWidget {
         'participants': FieldValue.arrayRemove([participantEntry]),
       });
 
-      toastification.show(
-        context: context,
-        type: ToastificationType.info,
-        title: const Text('Withdrawn'),
-        description: Text('You have withdrawn from "${tournament.name}".'),
-        autoCloseDuration: const Duration(seconds: 3),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-        alignment: Alignment.bottomCenter,
-      );
+      if (context.mounted) {
+        toastification.show(
+          context: context,
+          type: ToastificationType.success,
+          title: Text(
+            'Withdrawn',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+          ),
+          description: Text(
+            'You have withdrawn from "${tournament.name}".',
+            style: GoogleFonts.poppins(),
+          ),
+          style: ToastificationStyle.fillColored,
+          alignment: Alignment.bottomCenter,
+          autoCloseDuration: const Duration(seconds: 3),
+        );
+      }
     } catch (e) {
-      print('Error withdrawing from tournament ${tournament.id}: $e');
-      toastification.show(
-        context: context,
-        type: ToastificationType.error,
-        title: const Text('Withdrawal Failed'),
-        description: Text('Failed to withdraw from tournament: $e'),
-        autoCloseDuration: const Duration(seconds: 3),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
-        alignment: Alignment.bottomCenter,
-      );
+      debugPrint('Error withdrawing from tournament ${tournament.id}: $e');
+      if (context.mounted) {
+        toastification.show(
+          context: context,
+          type: ToastificationType.error,
+          title: Text(
+            'Withdrawal Failed',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
+          ),
+          description: Text(
+            'Failed to withdraw from tournament: $e',
+            style: GoogleFonts.poppins(),
+          ),
+          style: ToastificationStyle.fillColored,
+          alignment: Alignment.bottomCenter,
+          autoCloseDuration: const Duration(seconds: 3),
+        );
+      }
     }
+  }
+
+  String _formatDateRange(DateTime? start, DateTime? end) {
+    if (start == null || end == null) return 'Date not set';
+    if (start.year == end.year && start.month == end.month) {
+      return '${DateFormat('MMM dd').format(start)} - ${DateFormat('dd, yyyy').format(end)}';
+    } else if (start.year == end.year) {
+      return '${DateFormat('MMM dd').format(start)} - ${DateFormat('MMM dd, yyyy').format(end)}';
+    }
+    return '${DateFormat('MMM dd, yyyy').format(start)} - ${DateFormat('MMM dd, yyyy').format(end)}';
+  }
+
+  String _getTournamentStatus(Tournament tournament) {
+    final now = DateTime.now();
+    if (tournament.endDate == null) {
+      return 'Date not set';
+    }
+    if (now.isBefore(tournament.startDate)) {
+      return 'Upcoming';
+    } else if (now.isAfter(tournament.startDate) && now.isBefore(tournament.endDate!)) {
+      return 'Live';
+    } else {
+      return 'Completed';
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'Upcoming':
+        return Colors.blueAccent;
+      case 'Live':
+        return Colors.greenAccent;
+      case 'Completed':
+        return Colors.grey;
+      case 'Date not set':
+        return Colors.orangeAccent;
+      default:
+        return Colors.white;
+    }
+  }
+
+  void _showFullImageDialog(BuildContext context, String? imageUrl) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.7,
+                maxWidth: MediaQuery.of(context).size.width * 0.9,
+              ),
+              child: imageUrl != null && imageUrl.isNotEmpty
+                  ? Image.network(
+                      imageUrl,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Image.asset(
+                        'assets/tournament_placholder.jpg',
+                        fit: BoxFit.contain,
+                      ),
+                    )
+                  : Image.asset(
+                      'assets/tournament_placholder.jpg',
+                      fit: BoxFit.contain,
+                    ),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Close',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _getErrorMessage(dynamic error) {
+    if (error is FirebaseException) {
+      switch (error.code) {
+        case 'permission-denied':
+          return 'You don\'t have permission to access tournaments';
+        case 'unavailable':
+          return 'Network is unavailable. Please check your connection';
+        default:
+          return 'Failed to load tournaments. Error: ${error.message}';
+      }
+    }
+    return 'An unexpected error occurred. Please try again.';
   }
 
   @override
   Widget build(BuildContext context) {
-    print('Current userId: $userId'); // Debug log for userId
+    debugPrint('Current userId: $userId');
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1B2A),
+      backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
         title: Text(
           'Joined Tournaments',
@@ -74,15 +184,13 @@ class JoinedTournamentsPage extends StatelessWidget {
             fontSize: 22,
           ),
         ),
+        iconTheme: const IconThemeData(color: Colors.white),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        iconTheme: const IconThemeData(
-          color: Colors.white,
-        ),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFF1B263B), Color(0xFF0D1B2A)],
+              colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
             ),
@@ -93,331 +201,451 @@ class JoinedTournamentsPage extends StatelessWidget {
         stream: FirebaseFirestore.instance.collection('tournaments').snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: Colors.white));
-          }
-          if (snapshot.hasError) {
-            print('Error in StreamBuilder: ${snapshot.error}');
-            return Center(
-              child: Text(
-                'Error: ${snapshot.error}',
-                style: GoogleFonts.poppins(color: Colors.white70),
-              ),
-            );
-          }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Text(
-                'No tournaments available.',
-                style: GoogleFonts.poppins(color: Colors.white70, fontSize: 16),
+            return const Center(
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 2.5,
               ),
             );
           }
 
-         final tournaments = snapshot.data!.docs
-    .map((doc) {
-      try {
-        final data = doc.data() as Map<String, dynamic>;
-        return Tournament.fromFirestore(data, doc.id);
-      } catch (e) {
-        print('Error parsing tournament ${doc.id}: $e');
-        return null;
-      }
-    })
-    .where((tournament) => tournament != null && tournament.participants.any((p) => p['id'] == userId))
-    .toList()
-    .cast<Tournament>();
+          if (snapshot.hasError) {
+            debugPrint('Firestore Error: ${snapshot.error}');
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    color: Colors.redAccent,
+                    size: 48,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Error Loading Tournaments',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(
+                      _getErrorMessage(snapshot.error),
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.poppins(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {}, // Stream will auto-refresh
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'Try Again',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.emoji_events_outlined,
+                    size: 64,
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No tournaments joined yet',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white70,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Join a tournament to get started',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white54,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          final tournaments = snapshot.data!.docs
+              .map((doc) {
+                try {
+                  final data = doc.data() as Map<String, dynamic>;
+                  return Tournament.fromFirestore(data, doc.id);
+                } catch (e) {
+                  debugPrint('Error parsing tournament ${doc.id}: $e');
+                  return null;
+                }
+              })
+              .where((tournament) => tournament != null && tournament.participants.any((p) => p['id'] == userId))
+              .toList()
+              .cast<Tournament>();
 
           if (tournaments.isEmpty) {
             return Center(
-              child: Text(
-                'You haven\'t joined any tournaments yet.',
-                style: GoogleFonts.poppins(color: Colors.white70, fontSize: 16),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.emoji_events_outlined,
+                    size: 64,
+                    color: Colors.white.withOpacity(0.3),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No tournaments joined yet',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white70,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Join a tournament to get started',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white54,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
               ),
             );
           }
 
           return ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             itemCount: tournaments.length,
             itemBuilder: (context, index) {
               final tournament = tournaments[index];
-              final isPast = tournament.endDate!.isBefore(DateTime.now());
-              final isCreator = tournament.createdBy == userId;
-
-              // Check if withdraw option should be available (e.g., at least 3 days before event)
+              final status = _getTournamentStatus(tournament);
+              final statusColor = _getStatusColor(status);
               final withdrawDeadline = tournament.startDate.subtract(const Duration(days: 3));
-              final canWithdraw = DateTime.now().isBefore(withdrawDeadline) && !isPast;
+              final canWithdraw = DateTime.now().isBefore(withdrawDeadline) && status != 'Completed';
 
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                margin: const EdgeInsets.only(bottom: 16),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Stack(
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.05),
-                          border: Border.all(color: Colors.white.withOpacity(0.1)),
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 10,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                        ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () {
-                              showDialog(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  backgroundColor: const Color(0xFF1A237E),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  title: Text(
-                                    'Tournament Details',
-                                    style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600),
-                                  ),
-                                  content: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Name: ${tournament.name}',
-                                        style: GoogleFonts.poppins(color: Colors.white70),
-                                      ),
-                                      Text(
-                                        'Location: ${tournament.venue},${tournament.city}',
-                                        style: GoogleFonts.poppins(color: Colors.white70),
-                                      ),
-                                      Text(
-                                        'Date: ${DateFormat('MMM dd, yyyy').format(tournament.startDate)}',
-                                        style: GoogleFonts.poppins(color: Colors.white70),
-                                      ),
-                                      Text(
-                                        'Entry Fee: ${tournament.entryFee.toStringAsFixed(0)}',
-                                        style: GoogleFonts.poppins(color: Colors.white70),
-                                      ),
-                                      Text(
-                                        'Participants: ${tournament.participants.length}',
-                                        style: GoogleFonts.poppins(color: Colors.white70),
-                                      ),
-                                    ],
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(context),
-                                      child: Text(
-                                        'Close',
-                                        style: GoogleFonts.poppins(color: Colors.white),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          tournament.name.isNotEmpty ? tournament.name : 'Unnamed',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      Row(
-                                        children: [
-                                          if (isCreator)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: Colors.yellow.withOpacity(0.3),
-                                                borderRadius: BorderRadius.circular(12),
-                                              ),
-                                              child: Text(
-                                                'Hosted by You',
-                                                style: GoogleFonts.poppins(
-                                                  fontSize: 10,
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ),
-                                          if (isPast)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              margin: const EdgeInsets.only(left: 8),
-                                              decoration: BoxDecoration(
-                                                color: Colors.grey.withOpacity(0.3),
-                                                borderRadius: BorderRadius.circular(12),
-                                              ),
-                                              child: Text(
-                                                'Closed',
-                                                style: GoogleFonts.poppins(
-                                                  fontSize: 10,
-                                                  color: Colors.white70,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Venue: ${tournament.venue.isNotEmpty ? tournament.venue : 'No Venue'}',
-                                    style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
-                                  ),
-                                  Text(
-                                    'City: ${tournament.city.isNotEmpty ? tournament.city : 'No City'}',
-                                    style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
-                                  ),
-                                  Text(
-                                    'Date: ${DateFormat('MMM dd, yyyy').format(tournament.startDate)}',
-                                    style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
-                                  ),
-                                  Text(
-                                    'Entry Fee: ${tournament.entryFee == 0.0 ? 'Free' : tournament.entryFee.toStringAsFixed(0)}',
-                                    style: GoogleFonts.poppins(fontSize: 12, color: Colors.white70),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: Column(
-                                      children: [
-                                        GestureDetector(
-                                          onTap: isPast || !canWithdraw
-                                              ? null
-                                              : () async {
-                                                  final confirm = await showDialog<bool>(
-                                                    context: context,
-                                                    builder: (context) => AlertDialog(
-                                                      backgroundColor: const Color(0xFF1A237E),
-                                                      shape: RoundedRectangleBorder(
-                                                          borderRadius: BorderRadius.circular(12)),
-                                                      title: Text(
-                                                        'Confirm Withdrawal',
-                                                        style: GoogleFonts.poppins(
-                                                            color: Colors.white, fontWeight: FontWeight.w600),
-                                                      ),
-                                                      content: Text(
-                                                        'Are you sure you want to withdraw from "${tournament.name}"?',
-                                                        style: GoogleFonts.poppins(color: Colors.white70),
-                                                      ),
-                                                      actions: [
-                                                        TextButton(
-                                                          onPressed: () => Navigator.pop(context, false),
-                                                          child: Text(
-                                                            'Cancel',
-                                                            style: GoogleFonts.poppins(color: Colors.white),
-                                                          ),
-                                                        ),
-                                                        TextButton(
-                                                          onPressed: () => Navigator.pop(context, true),
-                                                          child: Text(
-                                                            'Withdraw',
-                                                            style: GoogleFonts.poppins(color: Colors.redAccent),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-
-                                                  if (confirm == true) {
-                                                    await _withdrawFromTournament(context, tournament);
-                                                  }
-                                                },
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              gradient: LinearGradient(
-                                                colors: isPast || !canWithdraw
-                                                    ? [Colors.grey, Colors.grey]
-                                                    : [Colors.redAccent, Colors.red],
-                                                begin: Alignment.topLeft,
-                                                end: Alignment.bottomRight,
-                                              ),
-                                              borderRadius: BorderRadius.circular(20),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: isPast || !canWithdraw
-                                                      ? Colors.grey.withOpacity(0.3)
-                                                      : Colors.red.withOpacity(0.3),
-                                                  blurRadius: 8,
-                                                  spreadRadius: 2,
-                                                ),
-                                              ],
-                                            ),
-                                            child: Text(
-                                              isPast || !canWithdraw ? 'Cannot Withdraw' : 'Withdraw',
-                                              style: GoogleFonts.poppins(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        if (!isPast)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 4),
-                                            child: Text(
-                                              'Can withdraw before ${DateFormat('MMM dd').format(withdrawDeadline)}',
-                                              style: GoogleFonts.poppins(
-                                                fontSize: 10,
-                                                color: Colors.white54,
-                                              ),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(16),
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.white.withOpacity(0.05),
-                                  Colors.transparent,
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
+              return _buildTournamentCard(context, tournament, status, statusColor, canWithdraw);
             },
           );
         },
       ),
     );
+  }
+
+  Widget _buildTournamentCard(
+    BuildContext context,
+    Tournament tournament,
+    String status,
+    Color statusColor,
+    bool canWithdraw,
+  ) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          colors: [
+            const Color(0xFF1E293B).withOpacity(0.8),
+            const Color(0xFF0F172A).withOpacity(0.9),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 10,
+            spreadRadius: 2,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Tournament Header with Status and Image
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.15),
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+              ),
+            ),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () => _showFullImageDialog(context, tournament.profileImage),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: statusColor, width: 1),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: tournament.profileImage != null && tournament.profileImage!.isNotEmpty
+                          ? Image.network(
+                              tournament.profileImage!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Image.asset(
+                                'assets/tournament_placholder.jpg',
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : Image.asset(
+                              'assets/tournament_placholder.jpg',
+                              fit: BoxFit.cover,
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    status,
+                    style: GoogleFonts.poppins(
+                      color: statusColor,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+                Text(
+                  'ID: ${tournament.id.substring(0, 6).toUpperCase()}',
+                  style: GoogleFonts.poppins(
+                    color: Colors.white54,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Tournament Content
+          GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => TournamentDetailsPage(
+                    tournament: tournament,
+                    creatorName: 'Unknown', // Note: You may need to fetch the creator's name
+                  ),
+                ),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Tournament Name
+                  Text(
+                    tournament.name.isNotEmpty ? tournament.name : 'Unnamed Tournament',
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 12),
+                  // Date Range
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_today,
+                        size: 16,
+                        color: Colors.white.withOpacity(0.7),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatDateRange(tournament.startDate, tournament.endDate),
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          color: Colors.white.withOpacity(0.9),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Venue and City
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.location_on,
+                        size: 16,
+                        color: Colors.white.withOpacity(0.7),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              tournament.venue.isNotEmpty ? tournament.venue : 'Venue not specified',
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                color: Colors.white.withOpacity(0.9),
+                              ),
+                            ),
+                            if (tournament.city.isNotEmpty)
+                              Text(
+                                tournament.city,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  color: Colors.white.withOpacity(0.7),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Divider
+                  Divider(
+                    height: 1,
+                    color: Colors.white.withOpacity(0.1),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Entry Fee
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.amber.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: Text(
+                          tournament.entryFee == 0.0
+                              ? 'Free Entry'
+                              : 'Entry Fee: ₹${tournament.entryFee.toStringAsFixed(0)}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.amber,
+                          ),
+                        ),
+                      ),
+                      // Action Button
+                      IconButton(
+                        icon: Icon(
+                          Icons.exit_to_app,
+                          size: 20,
+                          color: canWithdraw ? Colors.redAccent.withOpacity(0.8) : Colors.grey,
+                        ),
+                        onPressed: canWithdraw
+                            ? () => _confirmWithdrawTournament(context, tournament)
+                            : null,
+                        tooltip: canWithdraw ? 'Withdraw from Tournament' : 'Cannot Withdraw',
+                      ),
+                    ],
+                  ),
+                  if (canWithdraw)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Can withdraw before ${DateFormat('MMM dd').format(tournament.startDate.subtract(const Duration(days: 3)))}',
+                        style: GoogleFonts.poppins(
+                          fontSize: 10,
+                          color: Colors.white54,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmWithdrawTournament(BuildContext context, Tournament tournament) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text(
+          'Confirm Withdrawal',
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Text(
+          'Are you sure you want to withdraw from "${tournament.name}"?',
+          style: GoogleFonts.poppins(
+            color: Colors.white70,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+            ),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.poppins(),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.redAccent,
+            ),
+            child: Text(
+              'Withdraw',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _withdrawFromTournament(context, tournament);
+    }
   }
 }

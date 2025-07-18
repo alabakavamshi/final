@@ -28,21 +28,10 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
   final TextEditingController _genderController = TextEditingController();
 
   final List<String> _genderOptions = ['Male', 'Female', 'Other', 'Prefer not to say'];
-  final Map<String, bool> _isEditing = {
-    'firstName': false,
-    'lastName': false,
-    'email': false,
-    'phone': false,
-    'gender': false,
-  };
-  final Map<String, bool> _isChecking = {
-    'email': false,
-    'phone': false,
-    'gender': false,
-  };
-
-  String? _profileImageUrl;
   bool _isUploadingImage = false;
+  String? _profileImageUrl;
+  bool _isEditing = false;
+  Map<String, dynamic>? _playerStats;
 
   @override
   void initState() {
@@ -51,6 +40,12 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         context.read<AuthBloc>().add(AuthRefreshProfileEvent(user.uid));
+        if (context.read<AuthBloc>().state is AuthAuthenticated) {
+          final appUser = (context.read<AuthBloc>().state as AuthAuthenticated).appUser;
+          if (appUser?.role.toLowerCase() == 'player') {
+            _fetchPlayerStats(user.uid);
+          }
+        }
       }
     });
   }
@@ -65,18 +60,12 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
     super.dispose();
   }
 
-  String _normalizePhoneNumber(String phone) {
-    phone = phone.trim();
-    if (!phone.startsWith('+91')) return '+91$phone';
-    return phone;
-  }
-
   Future<void> _pickAndSetProfileImage(String uid) async {
     final List<String> sketchOptions = [
-      'assets/profile/avatar1.png',
-      'assets/profile/avatar2.png',
-      'assets/profile/avatar3.png',
-      'assets/profile/avatar4.png',
+      'assets/sketch1.jpg',
+      'assets/sketch2.jpeg',
+      'assets/sketch3.jpeg',
+      'assets/sketch4.jpeg',
     ];
 
     setState(() => _isUploadingImage = true);
@@ -97,62 +86,64 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
               ),
             ],
           ),
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Choose your avatar',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 16),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 1,
-                ),
-                itemCount: sketchOptions.length,
-                itemBuilder: (context, index) {
-                  return GestureDetector(
-                    onTap: () => Navigator.pop(context, sketchOptions[index]),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.blueAccent.withOpacity(0.5),
-                        ),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(15),
-                        child: Image.asset(
-                          sketchOptions[index],
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                   );
-                },
-              ),
-              const SizedBox(height: 24),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(
-                  'Cancel',
+          padding: const EdgeInsets.all(10),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Choose your avatar',
                   style: GoogleFonts.poppins(
-                    color: Colors.white70,
-                    fontSize: 16,
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: 1,
+                  ),
+                  itemCount: sketchOptions.length,
+                  itemBuilder: (context, index) {
+                    return GestureDetector(
+                      onTap: () => Navigator.pop(context, sketchOptions[index]),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.blueAccent.withOpacity(0.5),
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(15),
+                          child: Image.asset(
+                            sketchOptions[index],
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(
+                    'Cancel',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white70,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -174,193 +165,6 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
     } finally {
       if (mounted) setState(() => _isUploadingImage = false);
     }
-  }
-
-  Future<void> _saveField(String field, String value, String uid, String? currentValue) async {
-    try {
-      if (value.trim().isEmpty) {
-        _showToast('Field cannot be empty', ToastificationType.error);
-        return;
-      }
-
-      if (field == 'phone') value = _normalizePhoneNumber(value);
-
-      setState(() => _isChecking[field] = true);
-
-      await FirebaseFirestore.instance.collection('users').doc(uid).update({
-        field: value.trim(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      if (field == 'email') {
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null && user.email != value.trim()) {
-          await user.updateEmail(value.trim());
-          await user.sendEmailVerification();
-          _showToast('Email updated. Please verify your new email.', ToastificationType.info);
-        }
-      }
-
-      setState(() {
-        _isEditing[field] = false;
-        _isChecking[field] = false;
-      });
-      context.read<AuthBloc>().add(AuthRefreshProfileEvent(uid));
-      _showToast('$field updated successfully', ToastificationType.success);
-    } catch (e) {
-      setState(() => _isChecking[field] = false);
-      _showToast('Failed to update $field: ${e.toString()}', ToastificationType.error);
-    }
-  }
-
-  Future<void> _deleteAccount(String uid) async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final credential = await _showReauthenticationDialog();
-        if (credential == null) {
-          _showToast('Authentication required', ToastificationType.error);
-          return;
-        }
-
-        await user.reauthenticateWithCredential(credential);
-        
-        await FirebaseFirestore.instance.collection('users').doc(uid).delete();
-        await user.delete();
-        context.read<AuthBloc>().add(AuthLogoutEvent());
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const AuthPage()),
-          (route) => false,
-        );
-        _showToast('Account deleted', ToastificationType.success);
-      }
-    } catch (e) {
-      _showToast('Failed to delete account: ${e.toString()}', ToastificationType.error);
-    }
-  }
-
-  Future<AuthCredential?> _showReauthenticationDialog() async {
-    final emailController = TextEditingController();
-    final passwordController = TextEditingController();
-
-    return showDialog<AuthCredential>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF1E293B),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Verify Your Identity',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'For security, please enter your credentials to continue',
-                style: GoogleFonts.poppins(
-                  color: Colors.white70,
-                  fontSize: 14,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                controller: emailController,
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  labelStyle: GoogleFonts.poppins(color: Colors.white70),
-                  filled: true,
-                  fillColor: Colors.white.withOpacity(0.08),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  prefixIcon: Icon(Icons.email, color: Colors.white70),
-                ),
-                style: GoogleFonts.poppins(color: Colors.white),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: passwordController,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  labelStyle: GoogleFonts.poppins(color: Colors.white70),
-                  filled: true,
-                  fillColor: Colors.white.withOpacity(0.08),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  prefixIcon: Icon(Icons.lock, color: Colors.white70),
-                ),
-                style: GoogleFonts.poppins(color: Colors.white),
-                obscureText: true,
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(
-                      'Cancel',
-                      style: GoogleFonts.poppins(color: Colors.white70),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: () async {
-                      try {
-                        final email = emailController.text.trim();
-                        final password = passwordController.text.trim();
-                        if (email.isEmpty || password.isEmpty) {
-                          _showToast('Fields cannot be empty', ToastificationType.error);
-                          return;
-                        }
-                        final credential = EmailAuthProvider.credential(
-                          email: email, 
-                          password: password
-                        );
-                        Navigator.pop(context, credential);
-                      } catch (e) {
-                        _showToast('Authentication failed', ToastificationType.error);
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4F46E5),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      'Continue',
-                      style: GoogleFonts.poppins(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   void _showToast(String message, ToastificationType type) {
@@ -450,96 +254,6 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
                       ),
                       child: Text(
                         'Log Out',
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showDeleteAccountConfirmationDialog(String uid) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF1E293B),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.warning_amber_rounded,
-                size: 48,
-                color: Colors.amber,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Delete Account?',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'This will permanently delete your account and all associated data. This action cannot be undone.',
-                style: GoogleFonts.poppins(
-                  color: Colors.white70,
-                  fontSize: 14,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: Colors.white.withOpacity(0.2)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        'Cancel',
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _deleteAccount(uid);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFDC2626),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        'Delete',
                         style: GoogleFonts.poppins(
                           color: Colors.white,
                           fontWeight: FontWeight.w500,
@@ -681,23 +395,541 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
     }
   }
 
-  Widget _buildEditableField({
-    required String label,
-    required TextEditingController controller,
+  Widget _buildProfileTab(User user, AppUser appUser) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: _buildProfileHeader(user, appUser),
+          ),
+          const SizedBox(height: 32),
+          if (appUser.role.toLowerCase() == 'player')
+            _buildPlayerStatsSection(user, appUser),
+          _buildSectionHeader('PERSONAL INFORMATION'),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.1),
+              ),
+            ),
+            child: _isEditing
+                ? _buildEditProfileForm(user, appUser)
+                : Column(
+                    children: [
+                      _buildProfileInfoItem(
+                        icon: Icons.person_outline,
+                        label: 'First Name',
+                        value: appUser.firstName,
+                      ),
+                      _buildProfileInfoItem(
+                        icon: Icons.person_outline,
+                        label: 'Last Name',
+                        value: appUser.lastName,
+                      ),
+                      _buildProfileInfoItem(
+                        icon: Icons.email_outlined,
+                        label: 'Email',
+                        value: appUser.email ?? user.email ?? 'Not set',
+                      ),
+                      _buildProfileInfoItem(
+                        icon: Icons.phone_outlined,
+                        label: 'Phone',
+                        value: appUser.phone ?? user.phoneNumber ?? 'Not set',
+                      ),
+                      _buildProfileInfoItem(
+                        icon: Icons.person,
+                        label: 'Gender',
+                        value: appUser.gender ?? 'Not set',
+                        isLast: true,
+                      ),
+                    ],
+                  ),
+          ),
+          _buildSectionHeader('ACTIVITY'),
+          if (appUser.role == 'organizer')
+            _buildActionButton(
+              icon: Icons.tour,
+              label: 'Hosted Tournaments',
+              description: 'View and manage your hosted tournaments',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => HostedTournamentsPage(userId: user.uid),
+                ),
+              ),
+              color: const Color(0xFF8B5CF6),
+            ),
+          if (appUser.role == 'player')
+            _buildActionButton(
+              icon: Icons.event,
+              label: 'Joined Tournaments',
+              description: 'View your tournament participations',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => JoinedTournamentsPage(userId: user.uid),
+                ),
+              ),
+              color: const Color(0xFF10B981),
+            ),
+          if (appUser.role == 'umpire')
+            _buildActionButton(
+              icon: Icons.gavel,
+              label: 'Umpired Matches',
+              description: 'View matches you are officiating',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => UmpiredMatchesPage(userId: user.uid),
+                ),
+              ),
+              color: const Color(0xFF3B82F6),
+            ),
+          _buildActionButton(
+            icon: Icons.lock_reset,
+            label: 'Reset Password',
+            description: 'Change your account password',
+            onTap: () {
+              final email = appUser.email ?? user.email ?? '';
+              if (email.isNotEmpty) {
+                FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+                _showToast('Password reset email sent', ToastificationType.success);
+              } else {
+                _showToast('No email available', ToastificationType.error);
+              }
+            },
+            color: const Color(0xFFF59E0B),
+          ),
+          _buildSectionHeader('ACCOUNT'),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.1),
+              ),
+            ),
+            child: Column(
+              children: [
+                ListTile(
+                  onTap: _showLogoutConfirmationDialog,
+                  leading: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDC2626).withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.logout,
+                      color: Color(0xFFDC2626),
+                      size: 20,
+                    ),
+                  ),
+                  title: Text(
+                    'Log Out',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  trailing: Icon(
+                    Icons.chevron_right,
+                    color: Colors.white.withOpacity(0.5),
+                  ),
+                ),
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: Colors.white.withOpacity(0.1),
+                  indent: 56,
+                ),
+                ListTile(
+                  onTap: () => _showDeleteAccountConfirmationDialog(user.uid),
+                  leading: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDC2626).withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.delete_outline,
+                      color: Color(0xFFDC2626),
+                      size: 20,
+                    ),
+                  ),
+                  title: Text(
+                    'Delete Account',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  trailing: Icon(
+                    Icons.chevron_right,
+                    color: Colors.white.withOpacity(0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlayerStatsSection(User user, AppUser appUser) {
+    return Column(
+      children: [
+        _buildSectionHeader('PLAYER STATS'),
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.2),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildStatItem('Matches', _playerStats?['totalMatches']?.toString() ?? '0'),
+                    _buildStatItem(' Wins', _playerStats?['wins']?.toString() ?? '0'),
+                    _buildStatItem('Losses', _playerStats?['losses']?.toString() ?? '0'),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildStatItem('Win %', _playerStats?['winPercentage'] != null
+                        ? '${_playerStats!['winPercentage'].toStringAsFixed(1)}%'
+                        : '0%'),
+                    _buildStatItem('Streak', _playerStats?['currentStreak'] != null
+                        ? (_playerStats!['currentStreak'] > 0
+                            ? 'W-${_playerStats!['currentStreak']}'
+                            : 'L-${-_playerStats!['currentStreak']}')
+                        : '-'),
+                    _buildStatItem('Best', _playerStats?['bestTournamentResult']?.toString() ?? '-'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildStatItem(String label, String value) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            color: Colors.white70,
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEditProfileForm(User user, AppUser appUser) {
+    return Form(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: TextFormField(
+              controller: _firstNameController,
+              style: GoogleFonts.poppins(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'First Name',
+                labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                border: InputBorder.none,
+              ),
+            ),
+          ),
+          Divider(height: 1, color: Colors.white.withOpacity(0.1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: TextFormField(
+              controller: _lastNameController,
+              style: GoogleFonts.poppins(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Last Name',
+                labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                border: InputBorder.none,
+              ),
+            ),
+          ),
+          Divider(height: 1, color: Colors.white.withOpacity(0.1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: TextFormField(
+              controller: _phoneController,
+              style: GoogleFonts.poppins(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Phone',
+                labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                border: InputBorder.none,
+              ),
+              keyboardType: TextInputType.phone,
+            ),
+          ),
+          Divider(height: 1, color: Colors.white.withOpacity(0.1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: DropdownButtonFormField<String>(
+              value: _genderController.text.isNotEmpty ? _genderController.text : null,
+              items: _genderOptions.map((gender) {
+                return DropdownMenuItem<String>(
+                  value: gender,
+                  child: Text(
+                    gender,
+                    style: GoogleFonts.poppins(color: Colors.white),
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  _genderController.text = value;
+                }
+              },
+              decoration: InputDecoration(
+                labelText: 'Gender',
+                labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                border: InputBorder.none,
+              ),
+              dropdownColor: const Color(0xFF1E293B),
+              style: GoogleFonts.poppins(color: Colors.white),
+              icon: Icon(Icons.arrow_drop_down, color: Colors.white70),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      setState(() => _isEditing = false);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: BorderSide(color: Colors.white.withOpacity(0.2)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'Cancel',
+                      style: GoogleFonts.poppins(color: Colors.white),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => _saveProfileChanges(user.uid),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4F46E5),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'Save',
+                      style: GoogleFonts.poppins(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveProfileChanges(String uid) async {
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'firstName': _firstNameController.text.trim(),
+        'lastName': _lastNameController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'gender': _genderController.text.trim(),
+      });
+
+      context.read<AuthBloc>().add(AuthRefreshProfileEvent(uid));
+      setState(() => _isEditing = false);
+      _showToast('Profile updated successfully', ToastificationType.success);
+    } catch (e) {
+      _showToast('Failed to update profile: ${e.toString()}', ToastificationType.error);
+    }
+  }
+
+  Future<void> _fetchPlayerStats(String userId) async {
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+      }
+    });
+
+    try {
+      final tournamentsQuery = await FirebaseFirestore.instance
+          .collection('tournaments')
+          .get();
+
+      int totalMatches = 0;
+      int wins = 0;
+      int losses = 0;
+      DateTime? lastMatchDate;
+      int currentStreak = 0;
+      int longestWinStreak = 0;
+      int longestLossStreak = 0;
+      String bestTournamentResult = 'N/A';
+      final tournamentResults = <String, String>{};
+
+      for (var tournamentDoc in tournamentsQuery.docs) {
+        final tournamentData = tournamentDoc.data();
+        final matches = List<Map<String, dynamic>>.from(tournamentData['matches'] ?? []);
+
+        bool playedInTournament = false;
+        int tournamentWins = 0;
+        int tournamentLosses = 0;
+
+        for (var match in matches) {
+          final player1Id = match['player1Id']?.toString() ?? '';
+          final player2Id = match['player2Id']?.toString() ?? '';
+          final team1Ids = List<String>.from(match['team1Ids'] ?? []);
+          final team2Ids = List<String>.from(match['team2Ids'] ?? []);
+
+          if (player1Id == userId ||
+              player2Id == userId ||
+              team1Ids.contains(userId) ||
+              team2Ids.contains(userId)) {
+            final isCompleted = match['completed'] == true;
+
+            if (isCompleted) {
+              totalMatches++;
+              playedInTournament = true;
+
+              final winner = match['winner']?.toString();
+              if (winner == 'player1' && player1Id == userId ||
+                  winner == 'player2' && player2Id == userId ||
+                  winner == 'team1' && team1Ids.contains(userId) ||
+                  winner == 'team2' && team2Ids.contains(userId)) {
+                wins++;
+                tournamentWins++;
+                currentStreak = currentStreak >= 0 ? currentStreak + 1 : 1;
+                longestWinStreak = max(longestWinStreak, currentStreak);
+              } else if (winner != null && winner.isNotEmpty) {
+                losses++;
+                tournamentLosses++;
+                currentStreak = currentStreak <= 0 ? currentStreak - 1 : -1;
+                longestLossStreak = max(longestLossStreak, -currentStreak);
+              }
+
+              final matchTime = match['startTime'] as Timestamp?;
+              if (matchTime != null) {
+                final matchDate = matchTime.toDate();
+                if (lastMatchDate == null || matchDate.isAfter(lastMatchDate)) {
+                  lastMatchDate = matchDate;
+                }
+              }
+            }
+          }
+        }
+
+        if (playedInTournament) {
+          if (tournamentWins > 0 || tournamentLosses > 0) {
+            tournamentResults[tournamentDoc.id] = '$tournamentWins-$tournamentLosses';
+          }
+        }
+      }
+
+      if (tournamentResults.isNotEmpty) {
+        final bestResult = tournamentResults.values.reduce((a, b) {
+          final aParts = a.split('-');
+          final bParts = b.split('-');
+          final aWinRate = int.parse(aParts[0]) / (int.parse(aParts[0]) + int.parse(aParts[1]));
+          final bWinRate = int.parse(bParts[0]) / (int.parse(bParts[0]) + int.parse(bParts[1]));
+          return aWinRate > bWinRate ? a : b;
+        });
+        bestTournamentResult = bestResult;
+      }
+
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+              _playerStats = {
+                'totalMatches': totalMatches,
+                'wins': wins,
+                'losses': losses,
+                'winPercentage': totalMatches > 0 ? (wins / totalMatches * 100) : 0.0,
+                'currentStreak': currentStreak,
+                'longestWinStreak': longestWinStreak,
+                'longestLossStreak': longestLossStreak,
+                'bestTournamentResult': bestTournamentResult,
+              };
+            });
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+            });
+          }
+        });
+      }
+      debugPrint('Error fetching stats: $e');
+      _showToast('Failed to fetch stats', ToastificationType.error);
+    }
+  }
+
+  int max(int a, int b) => a > b ? a : b;
+
+  Widget _buildProfileInfoItem({
     required IconData icon,
-    required String fieldKey,
-    required String uid,
-    required String? currentValue,
-    TextInputType keyboardType = TextInputType.text,
+    required String label,
+    required String value,
     bool isLast = false,
   }) {
-    final isEditing = _isEditing[fieldKey] ?? false;
-    final isChecking = _isChecking[fieldKey] ?? false;
-
     return Container(
       decoration: BoxDecoration(
-        border: isLast 
-            ? null 
+        border: isLast
+            ? null
             : Border(
                 bottom: BorderSide(
                   color: Colors.white.withOpacity(0.08),
@@ -705,7 +937,7 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
                 ),
               ),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -731,183 +963,17 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                if (isEditing)
-                  TextField(
-                    controller: controller,
-                    enabled: isEditing,
-                    keyboardType: keyboardType,
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      contentPadding: EdgeInsets.zero,
-                      border: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      errorBorder: InputBorder.none,
-                      disabledBorder: InputBorder.none,
-                    ),
-                  )
-                else
-                  Text(
-                    currentValue ?? 'Not set',
-                    style: GoogleFonts.poppins(
-                      color: currentValue != null ? Colors.white : Colors.white54,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          if (isChecking)
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            )
-          else
-            IconButton(
-              icon: Icon(
-                isEditing ? Icons.check : Icons.edit,
-                size: 20,
-                color: isEditing ? Colors.white : Colors.white70,
-              ),
-              onPressed: () {
-                if (isEditing) {
-                  _saveField(fieldKey, controller.text, uid, currentValue);
-                } else {
-                  setState(() {
-                    _isEditing[fieldKey] = true;
-                    controller.text = currentValue ?? '';
-                  });
-                }
-              },
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGenderField({
-    required TextEditingController controller,
-    required String fieldKey,
-    required String uid,
-    required String currentValue,
-    bool isLast = false,
-  }) {
-    final isEditing = _isEditing[fieldKey] ?? false;
-    final isChecking = _isChecking[fieldKey] ?? false;
-
-    return Container(
-      decoration: BoxDecoration(
-        border: isLast 
-            ? null 
-            : Border(
-                bottom: BorderSide(
-                  color: Colors.white.withOpacity(0.08),
-                  width: 1,
-                ),
-              ),
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.person, size: 20, color: Colors.white70),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
                 Text(
-                  'Gender',
+                  value,
                   style: GoogleFonts.poppins(
-                    color: Colors.white70,
-                    fontSize: 12,
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 4),
-                if (isEditing)
-                  DropdownButton<String>(
-                    value: _genderOptions.contains(controller.text) 
-                        ? controller.text 
-                        : _genderOptions[0],
-                    isExpanded: true,
-                    underline: const SizedBox(),
-                    dropdownColor: const Color(0xFF1E293B),
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    items: _genderOptions.map((gender) {
-                      return DropdownMenuItem<String>(
-                        value: gender,
-                        child: Text(gender),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => controller.text = value);
-                      }
-                    },
-                  )
-                else
-                  Text(
-                    currentValue,
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          if (isChecking)
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            )
-          else
-            IconButton(
-              icon: Icon(
-                isEditing ? Icons.check : Icons.edit,
-                size: 20,
-                color: isEditing ? Colors.white : Colors.white70,
-              ),
-              onPressed: () {
-                if (isEditing) {
-                  _saveField(fieldKey, controller.text, uid, currentValue);
-                } else {
-                  setState(() {
-                    _isEditing[fieldKey] = true;
-                    controller.text = currentValue;
-                  });
-                }
-              },
-            ),
         ],
       ),
     );
@@ -995,6 +1061,244 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
     );
   }
 
+  void _showDeleteAccountConfirmationDialog(String uid) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.warning_amber_rounded,
+                size: 48,
+                color: Colors.amber,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Delete Account?',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'This will permanently delete your account and all associated data. This action cannot be undone.',
+                style: GoogleFonts.poppins(
+                  color: Colors.white70,
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(color: Colors.white.withOpacity(0.2)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Cancel',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _deleteAccount(uid);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFDC2626),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Delete',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteAccount(String uid) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final credential = await _showReauthenticationDialog();
+        if (credential == null) {
+          _showToast('Authentication required', ToastificationType.error);
+          return;
+        }
+
+        await user.reauthenticateWithCredential(credential);
+        await FirebaseFirestore.instance.collection('users').doc(uid).delete();
+        await user.delete();
+        context.read<AuthBloc>().add(AuthLogoutEvent());
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const AuthPage()),
+          (route) => false,
+        );
+        _showToast('Account deleted', ToastificationType.success);
+      }
+    } catch (e) {
+      _showToast('Failed to delete account: ${e.toString()}', ToastificationType.error);
+    }
+  }
+
+  Future<AuthCredential?> _showReauthenticationDialog() async {
+    final emailController = TextEditingController();
+    final passwordController = TextEditingController();
+
+    return showDialog<AuthCredential>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Verify Your Identity',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'For security, please enter your credentials to continue',
+                style: GoogleFonts.poppins(
+                  color: Colors.white70,
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: emailController,
+                decoration: InputDecoration(
+                  labelText: 'Email',
+                  labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.08),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  prefixIcon: Icon(Icons.email, color: Colors.white70),
+                ),
+                style: GoogleFonts.poppins(color: Colors.white),
+                keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: passwordController,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  labelStyle: GoogleFonts.poppins(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.08),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  prefixIcon: Icon(Icons.lock, color: Colors.white70),
+                ),
+                style: GoogleFonts.poppins(color: Colors.white),
+                obscureText: true,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(
+                      'Cancel',
+                      style: GoogleFonts.poppins(color: Colors.white70),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    onPressed: () async {
+                      try {
+                        final email = emailController.text.trim();
+                        final password = passwordController.text.trim();
+                        if (email.isEmpty || password.isEmpty) {
+                          _showToast('Fields cannot be empty', ToastificationType.error);
+                          return;
+                        }
+                        final credential = EmailAuthProvider.credential(
+                          email: email,
+                          password: password,
+                        );
+                        Navigator.pop(context, credential);
+                      } catch (e) {
+                        _showToast('Authentication failed', ToastificationType.error);
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4F46E5),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'Continue',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocListener<AuthBloc, AuthState>(
@@ -1033,203 +1337,102 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
 
             return Scaffold(
               backgroundColor: const Color(0xFF0F172A),
-              body: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: _buildProfileHeader(user, appUser!),
-                    ),
-                    const SizedBox(height: 32),
-                    _buildSectionHeader('PERSONAL INFORMATION'),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.05),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.1),
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          _buildEditableField(
-                            label: 'First Name',
-                            controller: _firstNameController,
-                            icon: Icons.person_outline,
-                            fieldKey: 'firstName',
-                            uid: user.uid,
-                            currentValue: appUser.firstName,
-                          ),
-                          _buildEditableField(
-                            label: 'Last Name',
-                            controller: _lastNameController,
-                            icon: Icons.person_outline,
-                            fieldKey: 'lastName',
-                            uid: user.uid,
-                            currentValue: appUser.lastName,
-                          ),
-                          _buildEditableField(
-                            label: 'Email',
-                            controller: _emailController,
-                            icon: Icons.email_outlined,
-                            fieldKey: 'email',
-                            uid: user.uid,
-                            currentValue: appUser.email ?? user.email,
-                            keyboardType: TextInputType.emailAddress,
-                          ),
-                          _buildEditableField(
-                            label: 'Phone',
-                            controller: _phoneController,
-                            icon: Icons.phone_outlined,
-                            fieldKey: 'phone',
-                            uid: user.uid,
-                            currentValue: appUser.phone ?? user.phoneNumber,
-                            keyboardType: TextInputType.phone,
-                          ),
-                          _buildGenderField(
-                            controller: _genderController,
-                            fieldKey: 'gender',
-                            uid: user.uid,
-                            currentValue: appUser.gender ?? _genderOptions[0],
-                            isLast: true,
-                          ),
-                        ],
-                      ),
-                    ),
-                    _buildSectionHeader('ACTIVITY'),
-                    if (appUser.role == 'organizer')
-                      _buildActionButton(
-                        icon: Icons.tour,
-                        label: 'Hosted Tournaments',
-                        description: 'View and manage your hosted tournaments',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => HostedTournamentsPage(userId: user.uid),
-                          ),
-                        ),
-                        color: const Color(0xFF8B5CF6),
-                      ),
-                    if (appUser.role == 'player')
-                      _buildActionButton(
-                        icon: Icons.event,
-                        label: 'Joined Tournaments',
-                        description: 'View your tournament participations',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => JoinedTournamentsPage(userId: user.uid),
-                          ),
-                        ),
-                        color: const Color(0xFF10B981),
-                      ),
-                    if (appUser.role == 'umpire')
-                      _buildActionButton(
-                        icon: Icons.gavel,
-                        label: 'Umpired Matches',
-                        description: 'View matches you are officiating',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => UmpiredMatchesPage(userId: user.uid),
-                          ),
-                        ),
-                        color: const Color(0xFF3B82F6),
-                      ),
-                    _buildActionButton(
-                      icon: Icons.lock_reset,
-                      label: 'Reset Password',
-                      description: 'Change your account password',
-                      onTap: () {
-                        final email = appUser.email ?? user.email ?? '';
-                        if (email.isNotEmpty) {
-                          FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-                          _showToast('Password reset email sent', ToastificationType.success);
-                        } else {
-                          _showToast('No email available', ToastificationType.error);
-                        }
-                      },
-                      color: const Color(0xFFF59E0B),
-                    ),
-                    _buildSectionHeader('ACCOUNT'),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.05),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.1),
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          ListTile(
-                            onTap: _showLogoutConfirmationDialog,
-                            leading: Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFDC2626).withOpacity(0.1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.logout,
-                                color: Color(0xFFDC2626),
-                                size: 20,
-                              ),
-                            ),
-                            title: Text(
-                              'Log Out',
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            trailing: Icon(
-                              Icons.chevron_right,
-                              color: Colors.white.withOpacity(0.5),
-                            ),
-                          ),
-                          Divider(
-                            height: 1,
-                            thickness: 1,
-                            color: Colors.white.withOpacity(0.1),
-                            indent: 56,
-                          ),
-                          ListTile(
-                            onTap: () => _showDeleteAccountConfirmationDialog(user.uid),
-                            leading: Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFDC2626).withOpacity(0.1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.delete_outline,
-                                color: Color(0xFFDC2626),
-                                size: 20,
-                              ),
-                            ),
-                            title: Text(
-                              'Delete Account',
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            trailing: Icon(
-                              Icons.chevron_right,
-                              color: Colors.white.withOpacity(0.5),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-                  ],
+              appBar: AppBar(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                title: Text(
+                  'My Profile',
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.settings, color: Colors.white),
+                    onPressed: () {
+                      showModalBottomSheet(
+                        context: context,
+                        backgroundColor: Colors.transparent,
+                        builder: (context) => Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E293B),
+                            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.3),
+                                blurRadius: 20,
+                                spreadRadius: 5,
+                              ),
+                            ],
+                          ),
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.edit, color: Colors.white70),
+                                title: Text(
+                                  _isEditing ? 'Cancel Edit' : 'Edit Profile',
+                                  style: GoogleFonts.poppins(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  setState(() => _isEditing = !_isEditing);
+                                },
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.image, color: Colors.white70),
+                                title: Text(
+                                  'Change Avatar',
+                                  style: GoogleFonts.poppins(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  _pickAndSetProfileImage(user.uid);
+                                },
+                              ),
+                              if (appUser!.role.toLowerCase() == 'player')
+                                ListTile(
+                                  leading: const Icon(Icons.refresh, color: Colors.white70),
+                                  title: Text(
+                                    'Refresh Stats',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    _fetchPlayerStats(user.uid);
+                                  },
+                                ),
+                              const SizedBox(height: 8),
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: Text(
+                                  'Cancel',
+                                  style: GoogleFonts.poppins(
+                                    color: Colors.white70,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
+              body: _buildProfileTab(user, appUser!),
             );
           }
 
@@ -1244,7 +1447,6 @@ class _PlayerProfilePageState extends State<PlayerProfilePage> {
     );
   }
 }
-
 class UmpiredMatchesPage extends StatefulWidget {
   final String userId;
 

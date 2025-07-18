@@ -26,17 +26,7 @@ class TournamentOverviewPage extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.edit, color: Colors.white),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => EditTournamentPage(tournament: tournament),
-                ),
-              );
-            },
-          ),
+         
           IconButton(
             icon: const Icon(Icons.delete, color: Colors.white),
             onPressed: () => _showDeleteConfirmation(context),

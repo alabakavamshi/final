@@ -1,3 +1,4 @@
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:game_app/models/tournament.dart';
@@ -65,6 +66,50 @@ class HostedTournamentsPage extends StatelessWidget {
     }
   }
 
+  void _showFullImageDialog(BuildContext context, String? imageUrl) {
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.7,
+                maxWidth: MediaQuery.of(context).size.width * 0.9,
+              ),
+              child: imageUrl != null && imageUrl.isNotEmpty
+                  ? Image.network(
+                      imageUrl,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => Image.asset(
+                        'assets/tournament_placholder.jpg',
+                        fit: BoxFit.contain,
+                      ),
+                    )
+                  : Image.asset(
+                      'assets/tournament_placholder.jpg',
+                      fit: BoxFit.contain,
+                    ),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Close',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -100,7 +145,6 @@ class HostedTournamentsPage extends StatelessWidget {
             .orderBy('startDate', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
-          // Improved error handling with detailed messages
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
               child: CircularProgressIndicator(
@@ -293,7 +337,7 @@ class HostedTournamentsPage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Tournament Header with Status
+          // Tournament Header with Status and Image
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
@@ -304,14 +348,43 @@ class HostedTournamentsPage extends StatelessWidget {
               ),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  status,
-                  style: GoogleFonts.poppins(
-                    color: statusColor,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
+                GestureDetector(
+                  onTap: () => _showFullImageDialog(context, tournament.profileImage),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: statusColor, width: 1),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: tournament.profileImage != null && tournament.profileImage!.isNotEmpty
+                          ? Image.network(
+                              tournament.profileImage!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Image.asset(
+                                'assets/tournament_placholder.jpg',
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : Image.asset(
+                              'assets/tournament_placholder.jpg',
+                              fit: BoxFit.cover,
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    status,
+                    style: GoogleFonts.poppins(
+                      color: statusColor,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
                 Text(
@@ -324,7 +397,6 @@ class HostedTournamentsPage extends StatelessWidget {
               ],
             ),
           ),
-          
           // Tournament Content
           GestureDetector(
             onTap: () {
@@ -354,7 +426,6 @@ class HostedTournamentsPage extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 12),
-                  
                   // Date Range
                   Row(
                     children: [
@@ -374,7 +445,6 @@ class HostedTournamentsPage extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  
                   // Venue and City
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -412,15 +482,13 @@ class HostedTournamentsPage extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  
                   // Divider
                   Divider(
                     height: 1,
                     color: Colors.white.withOpacity(0.1),
                   ),
                   const SizedBox(height: 12),
-                  
-                  // Footer with Entry Fee and Actions
+                 
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -446,7 +514,6 @@ class HostedTournamentsPage extends StatelessWidget {
                           ),
                         ),
                       ),
-                      
                       // Action Buttons
                       Row(
                         children: [
@@ -467,7 +534,6 @@ class HostedTournamentsPage extends StatelessWidget {
                             },
                             tooltip: 'Edit Tournament',
                           ),
-                          
                           // Delete Button
                           IconButton(
                             icon: Icon(

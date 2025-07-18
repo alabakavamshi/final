@@ -1,8 +1,12 @@
+
 import 'dart:async';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:game_app/models/tournament.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:toastification/toastification.dart';
 import 'package:geocoding/geocoding.dart';
@@ -32,7 +36,9 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   late String _gameType;
   late bool _bringOwnEquipment;
   late bool _costShared;
+  String? _profileImage;
   bool _isLoading = false;
+  bool _isUploadingImage = false;
   String? _fetchedCity;
   bool _isFetchingLocation = false;
   bool _isCityValid = true;
@@ -50,6 +56,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   late DateTime? _initialEndDate;
   late bool _initialBringOwnEquipment;
   late bool _initialCostShared;
+  late String? _initialProfileImage;
 
   final List<String> _gameFormatOptions = [
     'Men\'s Singles',
@@ -75,8 +82,8 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     _venueController.text = widget.tournament.venue;
     _cityController.text = widget.tournament.city;
     _entryFeeController.text = widget.tournament.entryFee.toStringAsFixed(2);
-    _rulesController.text = widget.tournament.rules.isEmpty
-        ? '''
+    _rulesController.text = (widget.tournament.rules!.isEmpty ? 
+    '''
 1. Matches are best of 3 games, each played to 21 points with a 2-point lead required to win.
 2. A rally point system is used; a point is scored on every serve.
 3. Players change sides after each game and at 11 points in the third game.
@@ -85,7 +92,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
 6. Faults include: shuttle landing out of bounds, double hits, or player touching the net.
 7. Respect the umpire's decisions and maintain sportsmanship at all times.
 '''
-        : widget.tournament.rules;
+ : widget.tournament.rules)!;
     _maxParticipantsController.text = widget.tournament.maxParticipants.toString();
     _selectedDate = widget.tournament.startDate;
     _selectedTime = widget.tournament.startTime;
@@ -98,6 +105,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         : _gameTypeOptions[0];
     _bringOwnEquipment = widget.tournament.bringOwnEquipment;
     _costShared = widget.tournament.costShared;
+    _profileImage = widget.tournament.profileImage;
 
     _initialName = _nameController.text;
     _initialVenue = _venueController.text;
@@ -110,6 +118,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     _initialEndDate = _selectedEndDate;
     _initialBringOwnEquipment = _bringOwnEquipment;
     _initialCostShared = _costShared;
+    _initialProfileImage = _profileImage;
   }
 
   @override
@@ -135,7 +144,8 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         _selectedTime != _initialStartTime ||
         _selectedEndDate != _initialEndDate ||
         _bringOwnEquipment != _initialBringOwnEquipment ||
-        _costShared != _initialCostShared;
+        _costShared != _initialCostShared ||
+        _profileImage != _initialProfileImage;
   }
 
   Future<bool> _onWillPop() async {
@@ -192,11 +202,9 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
   }
 
   Future<void> _selectDate(BuildContext context) async {
-    // If the existing startDate is in the past, use it as firstDate to avoid assertion error
     final firstDate = _selectedDate.isBefore(DateTime.now())
         ? _selectedDate
         : DateTime.now();
-    // Use current date as initialDate if startDate is in the past to enforce future selection
     final initialDate = _selectedDate.isBefore(DateTime.now())
         ? DateTime.now()
         : _selectedDate;
@@ -442,6 +450,55 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
     }
   }
 
+  Future<void> _uploadTournamentImage() async {
+    if (_isUploadingImage) return;
+    setState(() {
+      _isUploadingImage = true;
+    });
+
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+      if (pickedFile == null) {
+        if (mounted) {
+          setState(() {
+            _isUploadingImage = false;
+          });
+        }
+        return;
+      }
+
+      final file = File(pickedFile.path);
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('tournament_images/${widget.tournament.id}.jpg');
+      await storageRef.putFile(file);
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournament.id)
+          .update({'profileImage': downloadUrl});
+
+      if (mounted) {
+        setState(() {
+          _profileImage = downloadUrl;
+        });
+        _showSuccessToast('Image Uploaded', 'Tournament image updated successfully!');
+      }
+    } catch (e) {
+      if (mounted) {
+        _showErrorToast('Upload Failed', 'Failed to upload image: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingImage = false;
+        });
+      }
+    }
+  }
+
   Future<void> _updateTournament() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -494,6 +551,7 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
         costShared: _costShared,
         teams: widget.tournament.teams,
         matches: widget.tournament.matches,
+        profileImage: _profileImage,
       );
 
       await FirebaseFirestore.instance
@@ -570,6 +628,66 @@ class _EditTournamentPageState extends State<EditTournamentPage> {
             key: _formKey,
             child: ListView(
               children: [
+                // Profile Image Field
+                GestureDetector(
+                  onTap: _isUploadingImage ? null : _uploadTournamentImage,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blueGrey, width: 1),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: _profileImage != null && _profileImage!.isNotEmpty
+                                ? Image.network(
+                                    _profileImage!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) => Image.asset(
+                                      'assets/tournament_placholder.jpg',
+                                      fit: BoxFit.cover,
+                                    ),
+                                  )
+                                : Image.asset(
+                                    'assets/tournament_placholder.jpg',
+                                    fit: BoxFit.cover,
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _isUploadingImage ? 'Uploading...' : 'Tap to upload tournament image',
+                            style: GoogleFonts.poppins(
+                              color: Colors.white70,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        if (_isUploadingImage)
+                          const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 _buildTextField(
                   controller: _nameController,
                   label: 'Event Name',

@@ -7,157 +7,210 @@ class TournamentCard extends StatelessWidget {
   final Tournament tournament;
   final String creatorName;
   final bool isCreator;
+  final VoidCallback? onImageTap;
 
   const TournamentCard({
     super.key,
     required this.tournament,
     required this.creatorName,
     required this.isCreator,
+    this.onImageTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Split eventDate into startDate and startTime for display
     final startTime = tournament.startTime;
+    final participantsText = '${tournament.participants.length}/${tournament.maxParticipants}';
 
     return Container(
-      padding: const EdgeInsets.all(16),
-      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF2A1B3D), // Deep violet
-            Color(0xFF0F0C29), // Dark navy
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(
-          color: Colors.blueAccent.withOpacity(0.3),
-          width: 1,
-        ),
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.blue.withOpacity(0.2),
-            blurRadius: 8,
-            spreadRadius: 2,
-            offset: const Offset(0, 2),
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
+          // Creator section at the top
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+               
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Created by $creatorName',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                ),
+                if (isCreator)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE3F2FD),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'Your Event',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF1976D2),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          // Divider
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+          ),
+
+          // Tournament image and details
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GestureDetector(
+                  onTap: onImageTap,
+                  child: Container(
+                    width: double.infinity,
+                    height: 140,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.grey[100],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: tournament.profileImage != null && tournament.profileImage!.isNotEmpty
+                          ? Image.network(
+                              tournament.profileImage!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Image.asset(
+                                'assets/tournament_placholder.jpg',
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : Image.asset(
+                              'assets/tournament_placholder.jpg',
+                              fit: BoxFit.cover,
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
                   tournament.name,
                   style: GoogleFonts.poppins(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
-                    color: Colors.white,
+                    color: Colors.black,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
+                const SizedBox(height: 8),
+                _buildDetailRow(
+                  icon: Icons.sports_tennis,
+                  text: 'Badminton • ${tournament.gameFormat}',
+                ),
+                const SizedBox(height: 6),
+                _buildDetailRow(
+                  icon: Icons.location_on,
+                  text: '${tournament.venue}, ${tournament.city}',
+                ),
+                const SizedBox(height: 6),
+                _buildDetailRow(
+                  icon: Icons.calendar_today,
+                  text: tournament.endDate != null
+                      ? '${DateFormat('MMM dd, yyyy').format(tournament.startDate)} - ${DateFormat('MMM dd, yyyy').format(tournament.endDate!)} • ${startTime.format(context)}'
+                      : '${DateFormat('MMM dd, yyyy').format(tournament.startDate)} • ${startTime.format(context)}',
+                ),
+              ],
+            ),
+          ),
+
+          // Participants section with accent color
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color.fromARGB(255, 178, 177, 177),
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(16),
+                bottomRight: Radius.circular(16),
               ),
-              if (isCreator)
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.people_alt_outlined, size: 18, color: Color(0xFF757575)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Participants',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: const Color(0xFF757575),
+                      ),
+                    ),
+                  ],
+                ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.amber.withOpacity(0.8),
+                    color: const Color(0xFFE8F5E9),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    'Created by You',
+                    participantsText,
                     style: GoogleFonts.poppins(
-                      fontSize: 12,
+                      fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                      color: const Color(0xFF2E7D32),
                     ),
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.sports_tennis, color: Colors.white70, size: 16),
-              const SizedBox(width: 8),
-              Text(
-                'Badminton • ${tournament.gameFormat}',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.location_on, color: Colors.white70, size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '${tournament.venue}, ${tournament.city}',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w400,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.calendar_today, color: Colors.white70, size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  tournament.endDate != null
-                      ? '${DateFormat('MMM dd, yyyy ').format(tournament.startDate)} - ${DateFormat('MMM dd, yyyy').format(tournament.endDate!)} • ${startTime.format(context)} IST'
-                      : '${DateFormat('MMM dd, yyyy').format(tournament.startDate)} • ${startTime.format(context)} IST',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w400,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'By: $creatorName',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-              Text(
-                '${tournament.participants.length}/${tournament.maxParticipants} Players',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDetailRow({required IconData icon, required String text}) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: const Color(0xFF9E9E9E)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              color: const Color(0xFF616161),
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

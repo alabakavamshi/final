@@ -14,7 +14,7 @@ class Tournament {
   final String createdBy;
   final DateTime createdAt;
   final List<Map<String, dynamic>> participants;
-  final String rules;
+  final String? rules; // Changed to nullable
   final int maxParticipants;
   final String gameFormat;
   final String gameType;
@@ -22,6 +22,7 @@ class Tournament {
   final bool costShared;
   final List<Map<String, dynamic>> matches;
   final List<Map<String, dynamic>> teams;
+   String? profileImage;
 
   Tournament({
     required this.id,
@@ -36,7 +37,7 @@ class Tournament {
     required this.createdBy,
     required this.createdAt,
     required this.participants,
-    required this.rules,
+    this.rules, // Made optional
     required this.maxParticipants,
     required this.gameFormat,
     required this.gameType,
@@ -44,6 +45,7 @@ class Tournament {
     required this.costShared,
     this.matches = const [],
     this.teams = const [],
+    this.profileImage,
   });
 
   Map<String, dynamic> toFirestore() {
@@ -52,18 +54,18 @@ class Tournament {
       'name': name,
       'venue': venue,
       'city': city,
-      'startDate': Timestamp.fromDate(startDate), // Store as separate Timestamp
+      'startDate': Timestamp.fromDate(startDate),
       'startTime': {
         'hour': startTime.hour,
         'minute': startTime.minute,
-      }, // Store as a map for TimeOfDay
+      },
       'endDate': endDate != null ? Timestamp.fromDate(endDate!) : null,
       'entryFee': entryFee,
       'status': status,
       'createdBy': createdBy,
-      'createdAt': createdAt,
+      'createdAt': Timestamp.fromDate(createdAt),
       'participants': participants,
-      'rules': rules,
+      'rules': rules, // Can be null
       'maxParticipants': maxParticipants,
       'gameFormat': gameFormat,
       'gameType': gameType,
@@ -71,15 +73,13 @@ class Tournament {
       'costShared': costShared,
       'matches': matches,
       'teams': teams,
+      'profileImage': profileImage,
     };
   }
 
   factory Tournament.fromFirestore(Map<String, dynamic> data, String id) {
-    // Handle null startDate by providing a default (current date)
     final startDate =
         (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now();
-
-    // Handle null startTime with default values
     final startTimeData =
         data['startTime'] as Map<String, dynamic>? ?? {'hour': 0, 'minute': 0};
 
@@ -93,16 +93,15 @@ class Tournament {
         hour: startTimeData['hour'] as int,
         minute: startTimeData['minute'] as int,
       ),
-      endDate:
-          data['endDate'] != null
-              ? (data['endDate'] as Timestamp).toDate()
-              : null,
+      endDate: data['endDate'] != null
+          ? (data['endDate'] as Timestamp).toDate()
+          : null,
       entryFee: (data['entryFee'] as num?)?.toDouble() ?? 0.0,
       status: data['status'] ?? 'open',
       createdBy: data['createdBy'] ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       participants: List<Map<String, dynamic>>.from(data['participants'] ?? []),
-      rules: data['rules'] ?? '',
+      rules: data['rules'] as String?, // Handle null rules
       maxParticipants: data['maxParticipants'] ?? 0,
       gameFormat: data['gameFormat'] ?? 'Singles',
       gameType: data['gameType'] ?? 'Tournament',
@@ -110,6 +109,7 @@ class Tournament {
       costShared: data['costShared'] ?? false,
       matches: List<Map<String, dynamic>>.from(data['matches'] ?? []),
       teams: List<Map<String, dynamic>>.from(data['teams'] ?? []),
+      profileImage: data['profileImage'] as String?,
     );
   }
 }

@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -31,8 +30,7 @@ class MatchDetailsPage extends StatefulWidget {
   State<MatchDetailsPage> createState() => _MatchDetailsPageState();
 }
 
-class _MatchDetailsPageState extends State<MatchDetailsPage>
-    with SingleTickerProviderStateMixin {
+class _MatchDetailsPageState extends State<MatchDetailsPage> with SingleTickerProviderStateMixin {
   bool _isLoading = false;
   late Map<String, dynamic> _match;
   final _umpireNameController = TextEditingController();
@@ -72,7 +70,6 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
       if (_matchStartTime == null) {
         final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
         final defaultStart = now.add(const Duration(hours: 1));
-        print('No valid start time found, using default: $defaultStart');
         setState(() {
           _matchStartTime = Timestamp.fromDate(defaultStart);
           _match['startTime'] = _matchStartTime;
@@ -101,10 +98,9 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
         .doc(widget.tournamentId)
         .get();
     final data = tournamentDoc.data();
-    print('Tournament data: $data');
+
     final startDate = data?['startDate'] as Timestamp?;
     final startTimeData = data?['startTime'] as Map<String, dynamic>?;
-    print('startDate: $startDate, startTimeData: $startTimeData');
 
     if (startDate != null && startTimeData != null) {
       final hour = startTimeData['hour'] as int? ?? 0;
@@ -116,15 +112,12 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
         hour,
         minute,
       ).toUtc();
-      print('Tournament start time: $tournamentStart');
+
       if (_matchStartTime == null || _match['startTime'] == null) {
         setState(() {
           _matchStartTime = Timestamp.fromDate(tournamentStart);
           _match['startTime'] = _matchStartTime;
         });
-        print('Set matchStartTime to tournament time: ${_matchStartTime!.toDate()}');
-      } else {
-        print('Keeping existing match start time: ${_matchStartTime!.toDate()}');
       }
     }
     setState(() {});
@@ -155,7 +148,6 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
         _countdown = 'Start time not scheduled';
       });
       _countdownTimer?.cancel();
-      print('Countdown set to: $_countdown, _matchStartTime: $_matchStartTime');
       return;
     }
 
@@ -171,11 +163,8 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
       }
 
       final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
-      print('Local Now (IST): $now');
       final startTime = _matchStartTime!.toDate().toUtc().add(const Duration(hours: 5, minutes: 30));
       final difference = startTime.difference(now);
-
-      print('Now (IST): $now, StartTime (IST): $startTime, Difference: $difference');
 
       if (difference.isNegative) {
         setState(() {
@@ -204,41 +193,84 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
       return;
     }
 
-    final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
-    final initialDate = _matchStartTime?.toDate() ?? now;
-    final newDate = await showDatePicker(
-      context: context,
-      initialDate: initialDate,
-      firstDate: now,
-      lastDate: DateTime(now.year + 1),
-    );
-
-    if (newDate == null) return;
-
-    final newTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(initialDate),
-    );
-
-    if (newTime == null) return;
-
-    final newDateTime = DateTime(
-      newDate.year,
-      newDate.month,
-      newDate.day,
-      newTime.hour,
-      newTime.minute,
-    );
-
     setState(() {
       _isLoading = true;
     });
 
     try {
+      // Fetch tournament start and end dates
       final tournamentDoc = await FirebaseFirestore.instance
           .collection('tournaments')
           .doc(widget.tournamentId)
           .get();
+      final data = tournamentDoc.data();
+      if (data == null) {
+        throw Exception('Tournament data not found');
+      }
+
+      final tournamentStartDate = (data['startDate'] as Timestamp?)?.toDate();
+      final tournamentEndDate = (data['endDate'] as Timestamp?)?.toDate();
+      final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+
+      // Determine the valid date range
+      final firstDate = tournamentStartDate != null && tournamentStartDate.isAfter(now)
+          ? tournamentStartDate
+          : now;
+      final lastDate = tournamentEndDate ?? now.add(const Duration(days: 365)); // Fallback to 1 year from now
+
+      final initialDate = _matchStartTime?.toDate() ?? now;
+      final newDate = await showDatePicker(
+        context: context,
+        initialDate: initialDate.isBefore(firstDate) ? firstDate : (initialDate.isAfter(lastDate) ? lastDate : initialDate),
+        firstDate: firstDate,
+        lastDate: lastDate,
+      );
+
+      if (newDate == null) {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final newTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(initialDate),
+      );
+
+      if (newTime == null) {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final newDateTime = DateTime(
+        newDate.year,
+        newDate.month,
+        newDate.day,
+        newTime.hour,
+        newTime.minute,
+      );
+
+      // Ensure the new date-time is within bounds
+      if (newDateTime.isBefore(firstDate) || newDateTime.isAfter(lastDate.add(const Duration(days: 1)))) {
+        toastification.show(
+          context: context,
+          type: ToastificationType.error,
+          title: const Text('Invalid Date'),
+          description: const Text('Selected date must be within the tournament duration.'),
+          autoCloseDuration: const Duration(seconds: 2),
+          backgroundColor: Colors.red,
+          foregroundColor: Colors.white,
+          alignment: Alignment.bottomCenter,
+        );
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
       final updatedMatches = List<Map<String, dynamic>>.from(tournamentDoc.data()!['matches']);
       updatedMatches[widget.matchIndex] = {
         ..._match,
@@ -467,7 +499,7 @@ class _MatchDetailsPageState extends State<MatchDetailsPage>
         });
       }
     } catch (e) {
-      debugPrint('Error fetching user data: $e');
+      // Handle error silently as per original code
     }
   }
 
@@ -1489,7 +1521,6 @@ Error details: $e''',
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                 
                                   Container(
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 12, vertical: 4),

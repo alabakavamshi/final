@@ -24,8 +24,7 @@ class CreateTournamentPage extends StatefulWidget {
   State<CreateTournamentPage> createState() => _CreateTournamentPageState();
 }
 
-class _CreateTournamentPageState extends State<CreateTournamentPage>
-    with SingleTickerProviderStateMixin {
+class _CreateTournamentPageState extends State<CreateTournamentPage> with SingleTickerProviderStateMixin {
   static const Color primaryColor = Color(0xFFF5F5F5);
   static const Color secondaryColor = Color(0xFFFFFFFF);
   static const Color accentColor = Color(0xFF4E6BFF);
@@ -46,7 +45,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   DateTime? _selectedEndDate;
-  String _playStyle = 'Men\'s Singles';
+  String _playStyle = "Men's Singles";
   String _eventType = 'Knockout';
   bool _bringOwnEquipment = false;
   bool _costShared = false;
@@ -77,8 +76,19 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
   @override
   void initState() {
     super.initState();
+    _rulesController.text = _defaultRules(); // Set default rules
     _initializeAnimations();
     _initLocationServices();
+  }
+
+  String _defaultRules() {
+    return '''
+1. Matches follow BWF regulations - best of 3 games to 21 points (rally point scoring)
+2. Players must report 15 minutes before scheduled match time
+3. Proper sports attire and non-marking shoes required
+4. Tournament director reserves the right to modify rules as needed
+5. Any disputes will be resolved by the tournament committee
+''';
   }
 
   void _initializeAnimations() {
@@ -87,19 +97,10 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
       duration: const Duration(milliseconds: 300),
     );
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.easeIn,
-      ),
+      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
     );
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.1),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.easeIn,
-      ),
+    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
     );
     _animationController.forward();
   }
@@ -128,16 +129,14 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission != LocationPermission.whileInUse &&
-          permission != LocationPermission.always) {
+      if (permission != LocationPermission.whileInUse && permission != LocationPermission.always) {
         _showErrorToast('Location Error', 'Location permissions denied');
         return;
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
-      _showErrorToast('Location Error',
-          'Location permissions are denied. Please enable them in app settings.');
+      _showErrorToast('Location Error', 'Location permissions are denied. Please enable them in app settings.');
       return;
     }
 
@@ -146,7 +145,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
 
   Future<void> _fetchCurrentLocation() async {
     if (!mounted) return;
-    
+
     setState(() {
       _isFetchingLocation = true;
     });
@@ -158,30 +157,33 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
         timeLimit: const Duration(seconds: 10),
       ).timeout(const Duration(seconds: 15));
 
-      List<Placemark> placemarks;
+      List<Placemark> placemarks = [];
       try {
         placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
       } catch (e) {
-        debugPrint('High accuracy failed: $e, falling back to medium');
-        position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.medium,
-        );
+        debugPrint('High accuracy placemark failed: $e, falling back to medium');
+        position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.medium);
         placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
       }
 
-      if (placemarks.isNotEmpty) {
+      if (placemarks.isNotEmpty && mounted) {
         final place = placemarks.first;
-        final city = place.locality ?? place.name ?? place.administrativeArea;
+        final city = place.locality ?? place.administrativeArea ?? place.subAdministrativeArea ?? place.name;
         debugPrint('Placemarks: ${placemarks.map((p) => p.toString()).toList()}');
         debugPrint('Fetched city: $city');
 
-        if (city != null && city.isNotEmpty && mounted) {
+        if (city != null && city.isNotEmpty) {
           setState(() {
-            _fetchedCity = city;
-            _cityController.text = city;
+            _fetchedCity = _validCities[city.toLowerCase()] ?? city;
+            _cityController.text = _fetchedCity!;
             _isCityValid = true;
           });
+          _validateCityWithGeocoding(_fetchedCity!);
+        } else {
+          _showErrorToast('Location Error', 'Unable to determine city from location');
         }
+      } else {
+        _showErrorToast('Location Error', 'No placemarks found for the current location');
       }
     } on TimeoutException {
       debugPrint('Location request timed out');
@@ -207,6 +209,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
           _cityController.clear();
         });
       }
+      _showErrorToast('Invalid City', 'City cannot be empty');
       return;
     }
 
@@ -219,7 +222,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
     final normalizedCity = city.trim();
     final normalizedLower = normalizedCity.toLowerCase();
 
-    // Quick check for hardcoded cities
+    // Check hardcoded valid cities
     if (_validCities.containsKey(normalizedLower)) {
       if (mounted) {
         setState(() {
@@ -252,25 +255,18 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
 
         if (placemarks.isNotEmpty) {
           final place = placemarks.first;
-          final fetchedLocality = place.locality?.toLowerCase();
-          final fetchedAdminArea = place.administrativeArea?.toLowerCase();
-          final fetchedName = place.name?.toLowerCase();
-          final fetchedSubLocality = place.subLocality?.toLowerCase();
-          final fetchedSubAdminArea = place.subAdministrativeArea?.toLowerCase();
-
-          // Stricter matching
           final fields = [
-            fetchedLocality,
-            fetchedName,
-            fetchedAdminArea,
-            fetchedSubLocality,
-            fetchedSubAdminArea
+            place.locality?.toLowerCase(),
+            place.name?.toLowerCase(),
+            place.administrativeArea?.toLowerCase(),
+            place.subLocality?.toLowerCase(),
+            place.subAdministrativeArea?.toLowerCase(),
           ].where((f) => f != null && f.contains(normalizedLower)).toList();
 
           if (fields.isNotEmpty) {
             if (mounted) {
               setState(() {
-                _cityController.text = placemarks.first.locality ?? normalizedCity;
+                _cityController.text = place.locality ?? normalizedCity;
                 _isCityValid = true;
                 _isValidatingCity = false;
               });
@@ -281,7 +277,6 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
         }
       }
 
-      // No valid match, clear field after 2 seconds
       if (mounted) {
         setState(() {
           _isCityValid = false;
@@ -290,7 +285,6 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
         });
         _showErrorToast('Invalid City', 'No matching city found for "$normalizedCity"');
       }
-      debugPrint('No valid match for $normalizedCity, field cleared');
     } catch (e, stackTrace) {
       debugPrint('Geocoding error: $e\n$stackTrace');
       if (_validCities.containsKey(normalizedLower)) {
@@ -310,7 +304,6 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
           });
           _showErrorToast('Invalid City', 'Geocoding failed for "$normalizedCity"');
         }
-        debugPrint('Geocoding failed, clearing field for $normalizedCity');
       }
     }
   }
@@ -340,9 +333,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
             ),
             dialogBackgroundColor: secondaryColor,
             textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: accentColor,
-              ),
+              style: TextButton.styleFrom(foregroundColor: accentColor),
             ),
           ),
           child: child!,
@@ -379,9 +370,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
             ),
             dialogBackgroundColor: secondaryColor,
             textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: accentColor,
-              ),
+              style: TextButton.styleFrom(foregroundColor: accentColor),
             ),
           ),
           child: child!,
@@ -413,9 +402,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
             ),
             dialogBackgroundColor: secondaryColor,
             textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: accentColor,
-              ),
+              style: TextButton.styleFrom(foregroundColor: accentColor),
             ),
           ),
           child: child!,
@@ -432,115 +419,113 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
   }
 
   Future<void> _createTournament() async {
-    debugPrint('Starting tournament creation');
-    if (!_formKey.currentState!.validate()) {
-      debugPrint('Form validation failed');
-      return;
-    }
-    if (_selectedDate == null || _selectedTime == null) {
-      debugPrint('Start date or time missing');
-      _showErrorToast('Start Date & Time Required', 'Please select a start date and time');
-      return;
-    }
-    if (_selectedEndDate == null) {
-      debugPrint('End date missing');
-      _showErrorToast('End Date Required', 'Please select an end date');
-      return;
-    }
-    if (!_isCityValid) {
-      debugPrint('Invalid city');
-      _showErrorToast('Invalid City', 'Please enter a valid Indian city');
-      return;
-    }
-
-    final startDateTime = DateTime(
-      _selectedDate!.year,
-      _selectedDate!.month,
-      _selectedDate!.day,
-      _selectedTime!.hour,
-      _selectedTime!.minute,
-    );
-
-    final endDate = DateTime(
-      _selectedEndDate!.year,
-      _selectedEndDate!.month,
-      _selectedEndDate!.day,
-    );
-
-    if (endDate.isBefore(startDateTime)) {
-      debugPrint('Invalid date range: endDate $endDate before startDateTime $startDateTime');
-      _showErrorToast('Invalid Date Range', 'End date must be on or after start date');
-      return;
-    }
-
-    if (mounted) {
-      setState(() {
-        _isLoading = true;
-      });
-    }
-
-    try {
-      debugPrint('Creating tournament document');
-      final tournamentRef = FirebaseFirestore.instance.collection('tournaments').doc();
-      final newTournament = Tournament(
-        id: tournamentRef.id,
-        name: _nameController.text.trim(),
-        venue: _venueController.text.trim(),
-        city: _cityController.text.trim(),
-        startDate: _selectedDate!,
-        startTime: _selectedTime!,
-        endDate: endDate,
-        entryFee: double.tryParse(_entryFeeController.text.trim()) ?? 0.0,
-        status: 'open',
-        createdBy: widget.userId,
-        createdAt: DateTime.now(),
-        participants: [],
-        rules: _rulesController.text.trim(),
-        maxParticipants: int.tryParse(_maxParticipantsController.text.trim()) ?? 1,
-        gameFormat: _playStyle,
-        gameType: _eventType,
-        bringOwnEquipment: _bringOwnEquipment,
-        costShared: _costShared,
-      );
-
-      final tournamentData = newTournament.toFirestore();
-      debugPrint('Tournament data: $tournamentData');
-
-      if (tournamentData.containsValue(null)) {
-        throw Exception('Tournament data contains null values: $tournamentData');
-      }
-      if (newTournament.name.isEmpty || newTournament.venue.isEmpty || newTournament.city.isEmpty) {
-        throw Exception('Required fields are empty');
-      }
-
-      await tournamentRef.set(tournamentData);
-      debugPrint('Tournament created successfully: ${newTournament.id}');
-
-      _showSuccessToast(
-        'Event Created',
-        '"${newTournament.name}" has been successfully created',
-      );
-
-      await Future.delayed(const Duration(milliseconds: 1500));
-
-      if (mounted) {
-        widget.onTournamentCreated?.call();
-      }
-    } on FirebaseException catch (e, stackTrace) {
-      debugPrint('Firestore error: ${e.code} - ${e.message}\n$stackTrace');
-      _showErrorToast('Creation Failed', 'Firestore error: ${e.message}');
-    } catch (e, stackTrace) {
-      debugPrint('Tournament creation failed: $e\n$stackTrace');
-      _showErrorToast('Creation Failed', 'Failed to create event: ${e.toString()}');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
+  debugPrint('Starting tournament creation');
+  if (!_formKey.currentState!.validate()) {
+    debugPrint('Form validation failed');
+    return;
+  }
+  if (_selectedDate == null || _selectedTime == null) {
+    debugPrint('Start date or time missing');
+    _showErrorToast('Start Date & Time Required', 'Please select a start date and time');
+    return;
+  }
+  if (_selectedEndDate == null) {
+    debugPrint('End date missing');
+    _showErrorToast('End Date Required', 'Please select an end date');
+    return;
+  }
+  if (!_isCityValid) {
+    debugPrint('Invalid city');
+    _showErrorToast('Invalid City', 'Please enter a valid Indian city');
+    return;
   }
 
+  final startDateTime = DateTime(
+    _selectedDate!.year,
+    _selectedDate!.month,
+    _selectedDate!.day,
+    _selectedTime!.hour,
+    _selectedTime!.minute,
+  );
+
+  final endDate = DateTime(
+    _selectedEndDate!.year,
+    _selectedEndDate!.month,
+    _selectedEndDate!.day,
+  );
+
+  if (endDate.isBefore(startDateTime)) {
+    debugPrint('Invalid date range: endDate $endDate before startDateTime $startDateTime');
+    _showErrorToast('Invalid Date Range', 'End date must be on or after start date');
+    return;
+  }
+
+  if (mounted) {
+    setState(() {
+      _isLoading = true;
+    });
+  }
+
+  try {
+    debugPrint('Creating tournament document');
+    final tournamentRef = FirebaseFirestore.instance.collection('tournaments').doc();
+    final newTournament = Tournament(
+      id: tournamentRef.id,
+      name: _nameController.text.trim(),
+      venue: _venueController.text.trim(),
+      city: _cityController.text.trim(),
+      startDate: _selectedDate!,
+      startTime: _selectedTime!,
+      endDate: endDate,
+      entryFee: double.tryParse(_entryFeeController.text.trim()) ?? 0.0,
+      status: 'open',
+      createdBy: widget.userId,
+      createdAt: DateTime.now(),
+      participants: [],
+      rules: _rulesController.text.trim().isNotEmpty ? _rulesController.text.trim() : null,
+      maxParticipants: int.tryParse(_maxParticipantsController.text.trim()) ?? 1,
+      gameFormat: _playStyle,
+      gameType: _eventType,
+      bringOwnEquipment: _bringOwnEquipment,
+      costShared: _costShared,
+      profileImage: null, // Explicitly set to null as it's optional
+    );
+
+    final tournamentData = newTournament.toFirestore();
+    debugPrint('Tournament data: $tournamentData');
+
+    // Validate only required fields
+    if (newTournament.name.isEmpty || newTournament.venue.isEmpty || newTournament.city.isEmpty) {
+      throw Exception('Required fields are empty');
+    }
+
+    await tournamentRef.set(tournamentData);
+    debugPrint('Tournament created successfully: ${newTournament.id}');
+
+    _showSuccessToast(
+      'Event Created',
+      '"${newTournament.name}" has been successfully created',
+    );
+
+    await Future.delayed(const Duration(milliseconds: 1500));
+
+    if (mounted) {
+      widget.onTournamentCreated?.call();
+    }
+  } on FirebaseException catch (e, stackTrace) {
+    debugPrint('Firestore error: ${e.code} - ${e.message}\n$stackTrace');
+    _showErrorToast('Creation Failed', 'Firestore error: ${e.message}');
+  } catch (e, stackTrace) {
+    debugPrint('Tournament creation failed: $e\n$stackTrace');
+    _showErrorToast('Creation Failed', 'Failed to create event: ${e.toString()}');
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+}
   void _showSuccessToast(String title, String message) {
     debugPrint('Showing success toast: $title - $message');
     toastification.show(
@@ -612,8 +597,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                         backgroundColor: secondaryColor.withOpacity(0.9),
                         elevation: 2,
                         leading: IconButton(
-                          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                              color: textPrimary, size: 22),
+                          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: textPrimary, size: 22),
                           onPressed: () {
                             debugPrint('Back button pressed');
                             if (widget.onBackPressed != null) {
@@ -645,10 +629,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                             label: 'Tournament Name',
                             hintText: 'e.g., Summer Badminton Championship',
                             icon: Icons.event,
-                            validator: (value) =>
-                                value == null || value.trim().isEmpty
-                                    ? 'Enter a tournament name'
-                                    : null,
+                            validator: (value) => value == null || value.trim().isEmpty ? 'Enter a tournament name' : null,
                           ),
                           const SizedBox(height: 16),
                           _buildDropdown(
@@ -656,12 +637,8 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                             value: _eventType,
                             items: [
                               'Knockout',
-                              'Double Elimination',
                               'Round-Robin',
-                              'Group + Knockout',
-                              'Team Format',
-                              'Ladder',
-                              'Swiss Format'
+                              // Removed unsupported types for simplicity, add back if needed
                             ],
                             onChanged: (value) {
                               if (mounted) {
@@ -681,12 +658,9 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                             label: 'Venue Name',
                             hintText: 'e.g., City Sports Complex',
                             icon: Icons.location_on,
-                            validator: (value) =>
-                                value == null || value.trim().isEmpty
-                                    ? 'Enter a venue name'
-                                    : null,
+                            validator: (value) => value == null || value.trim().isEmpty ? 'Enter a venue name' : null,
                           ),
-                          const SizedBox(height: 25),
+                          const SizedBox(height: 16),
                           _buildCityFieldWithLocation(),
                           const SizedBox(height: 24),
                           _buildSectionHeader('Date & Time'),
@@ -705,8 +679,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                                   icon: Icons.currency_rupee,
                                   keyboardType: TextInputType.number,
                                   validator: (value) {
-                                    if (value == null ||
-                                        value.trim().isEmpty) {
+                                    if (value == null || value.trim().isEmpty) {
                                       return 'Enter an entry fee';
                                     }
                                     final fee = double.tryParse(value);
@@ -726,8 +699,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                                   icon: Icons.people,
                                   keyboardType: TextInputType.number,
                                   validator: (value) {
-                                    if (value == null ||
-                                        value.trim().isEmpty) {
+                                    if (value == null || value.trim().isEmpty) {
                                       return 'Enter max participants';
                                     }
                                     final max = int.tryParse(value);
@@ -818,9 +790,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
             fontSize: 14,
             fontWeight: FontWeight.w500,
           ),
-          prefixIcon: icon != null
-              ? Icon(icon, color: accentColor, size: 20)
-              : null,
+          prefixIcon: icon != null ? Icon(icon, color: accentColor, size: 20) : null,
           suffixIcon: suffix,
           filled: true,
           fillColor: secondaryColor,
@@ -830,22 +800,13 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(
-              color: borderColor,
-              width: 1,
-            ),
+            borderSide: const BorderSide(color: borderColor, width: 1),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(
-              color: accentColor,
-              width: 1.5,
-            ),
+            borderSide: const BorderSide(color: accentColor, width: 1.5),
           ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 16,
-          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         ),
         validator: validator,
       ),
@@ -888,15 +849,15 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                 size: 20,
               ),
               onPressed: _fetchedCity != null
-                  ? () {
+                  ? () async {
                       if (mounted) {
                         setState(() {
                           _cityController.text = _fetchedCity!;
-                          _isCityValid = true;
-                          _isValidatingCity = false;
+                          _isValidatingCity = true;
                         });
+                        await _validateCityWithGeocoding(_fetchedCity!);
+                        debugPrint('Set city to fetched: $_fetchedCity');
                       }
-                      debugPrint('Set city to fetched: $_fetchedCity');
                     }
                   : null,
             ),
@@ -907,11 +868,11 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
 
   Widget _buildPlayStyleSelector() {
     const options = [
-      'Men\'s Singles',
-      'Women\'s Singles',
-      'Men\'s Doubles',
-      'Women\'s Doubles',
-      'Mixed Doubles'
+      "Men's Singles",
+      "Women's Singles",
+      "Men's Doubles",
+      "Women's Doubles",
+      'Mixed Doubles',
     ];
 
     return Column(
@@ -961,10 +922,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 showCheckmark: false,
               );
             },
@@ -996,10 +954,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             color: secondaryColor,
-            border: Border.all(
-              color: borderColor,
-              width: 1,
-            ),
+            border: Border.all(color: borderColor, width: 1),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: DropdownButtonFormField<String>(
@@ -1017,10 +972,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                 ),
               );
             }).toList(),
-            onChanged: (value) {
-              onChanged(value);
-              debugPrint('Selected $label: $value');
-            },
+            onChanged: onChanged,
             decoration: const InputDecoration(
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
@@ -1028,14 +980,8 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
               isDense: true,
             ),
             dropdownColor: secondaryColor,
-            icon: Icon(
-              Icons.arrow_drop_down,
-              color: accentColor,
-            ),
-            style: GoogleFonts.poppins(
-              color: textPrimary,
-              fontSize: 15,
-            ),
+            icon: Icon(Icons.arrow_drop_down, color: accentColor),
+            style: GoogleFonts.poppins(color: textPrimary, fontSize: 15),
             borderRadius: BorderRadius.circular(12),
           ),
         ),
@@ -1057,27 +1003,18 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
                     color: secondaryColor,
-                    border: Border.all(
-                      color: borderColor,
-                      width: 1,
-                    ),
+                    border: Border.all(color: borderColor, width: 1),
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.calendar_today,
-                        color: accentColor,
-                        size: 20,
-                      ),
+                      Icon(Icons.calendar_today, color: accentColor, size: 20),
                       const SizedBox(width: 12),
                       Text(
                         _selectedDate == null
                             ? 'Start Date'
                             : DateFormat('MMM dd, yyyy').format(_selectedDate!),
                         style: GoogleFonts.poppins(
-                          color: _selectedDate == null
-                              ? textSecondary
-                              : textPrimary,
+                          color: _selectedDate == null ? textSecondary : textPrimary,
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
                         ),
@@ -1097,27 +1034,16 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
                     color: secondaryColor,
-                    border: Border.all(
-                      color: borderColor,
-                      width: 1,
-                    ),
+                    border: Border.all(color: borderColor, width: 1),
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.access_time,
-                        color: accentColor,
-                        size: 20,
-                      ),
+                      Icon(Icons.access_time, color: accentColor, size: 20),
                       const SizedBox(width: 12),
                       Text(
-                        _selectedTime == null
-                            ? 'Start Time'
-                            : _selectedTime!.format(context),
+                        _selectedTime == null ? 'Start Time' : _selectedTime!.format(context),
                         style: GoogleFonts.poppins(
-                          color: _selectedTime == null
-                              ? textSecondary
-                              : textPrimary,
+                          color: _selectedTime == null ? textSecondary : textPrimary,
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
                         ),
@@ -1141,28 +1067,18 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
                     color: secondaryColor,
-                    border: Border.all(
-                      color: borderColor,
-                      width: 1,
-                    ),
+                    border: Border.all(color: borderColor, width: 1),
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.calendar_today,
-                        color: accentColor,
-                        size: 20,
-                      ),
+                      Icon(Icons.calendar_today, color: accentColor, size: 20),
                       const SizedBox(width: 12),
                       Text(
                         _selectedEndDate == null
                             ? 'End Date'
-                            : DateFormat('MMM dd, yyyy')
-                                .format(_selectedEndDate!),
+                            : DateFormat('MMM dd, yyyy').format(_selectedEndDate!),
                         style: GoogleFonts.poppins(
-                          color: _selectedEndDate == null
-                              ? textSecondary
-                              : textPrimary,
+                          color: _selectedEndDate == null ? textSecondary : textPrimary,
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
                         ),
@@ -1181,9 +1097,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
 
   Widget _buildAdditionalSettings() {
     return Theme(
-      data: Theme.of(context).copyWith(
-        dividerColor: Colors.transparent,
-      ),
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         title: Text(
           'Additional Settings',
@@ -1193,7 +1107,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
             fontWeight: FontWeight.w600,
           ),
         ),
-        initiallyExpanded: false,
+        initiallyExpanded: true, // Encourage users to see default rules
         collapsedBackgroundColor: Colors.transparent,
         backgroundColor: Colors.transparent,
         iconColor: accentColor,
@@ -1206,9 +1120,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
             hintText: 'Describe the tournament rules and requirements...',
             icon: Icons.rule,
             maxLines: 4,
-            validator: (value) => value == null || value.trim().isEmpty
-                ? 'Please provide some rules'
-                : null,
+            validator: (value) => value == null || value.trim().isEmpty ? 'Please provide some rules' : null,
           ),
           const SizedBox(height: 16),
           _buildSwitchTile(
@@ -1254,10 +1166,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         color: secondaryColor,
-        border: Border.all(
-          color: borderColor,
-          width: 1,
-        ),
+        border: Border.all(color: borderColor, width: 1),
       ),
       child: Row(
         children: [
@@ -1304,9 +1213,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
         onPressed: _isLoading ? null : _createTournament,
         style: ElevatedButton.styleFrom(
           backgroundColor: accentColor,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           elevation: 4,
           shadowColor: accentColor.withOpacity(0.3),
           padding: const EdgeInsets.symmetric(vertical: 16),
@@ -1315,10 +1222,7 @@ class _CreateTournamentPageState extends State<CreateTournamentPage>
             ? const SizedBox(
                 width: 24,
                 height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
               )
             : Text(
                 'Create Tournament',
